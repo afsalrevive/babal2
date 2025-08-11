@@ -439,13 +439,24 @@ const columnsCancelled = ref<DataTableColumns<any>>([
 const fetchData = async () => {
   loading.value = true;
   try {
+    // Construct parameters to send to the backend
     const params = {
-      status: 'all',
-      // We are no longer applying filters here, they are applied on the client side
-      // The API call returns all visas
+      status: activeTab.value === 'active' ? 'booked' : 'cancelled',
+      start_date: dateRange.value?.[0] ? formatDateForAPI(dateRange.value[0]) : undefined,
+      end_date: dateRange.value?.[1] ? formatDateForAPI(dateRange.value[1]) : undefined,
+      search_query: searchQuery.value,
     };
+    
+    // Make the API call with the filters
     const res = await api.get('/api/visas', { params });
-    allVisas.value = res.data;
+    
+    // Assign the response directly to the active/cancelled visa arrays
+    if (activeTab.value === 'active') {
+      allVisas.value = res.data.filter(v => v.status === 'booked');
+    } else {
+      allVisas.value = res.data.filter(v => v.status === 'cancelled');
+    }
+
   } catch (e) {
     message.error('Failed to load visas');
   } finally {
@@ -686,8 +697,6 @@ const handleEntityModalClose = (val: boolean) => {
 
 // Use a single watch to handle all data fetching triggers
 watch([activeTab, searchQuery, dateRange], () => {
-  // Reset pagination to page 1 whenever filters change
-  pagination.page = 1;
   fetchData();
 }, { deep: true, immediate: true });
 

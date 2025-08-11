@@ -253,7 +253,7 @@ const props = defineProps({
   referenceNumber: { type: String, required: true },
   isVisaManagement: { type: Boolean, default: false },
   bulkAddMode: { type: Boolean, default: false },
-  resetFieldsOnBulkAdd: { type: Array, default: () => ['passenger_id'] }
+  resetFieldsOnBulkAdd: { type: Array, default: () => ['passenger_id', 'customer_id', 'agent_id', 'customer_paid','agent_paid'] }
 });
 
 const emits = defineEmits(['record-booked', 'record-updated', 'open-entity-modal', 'cancel', 'update:bulkAddMode']);
@@ -294,6 +294,7 @@ const profitPercentage = ref(10);
 const formRules = computed<FormRules>(() => {
   const rules: FormRules = {
     customer_id: { required: true, message: 'Customer is required', validator: (rule, value) => value !== null && value !== undefined, trigger: ['change', 'blur'] },
+    passenger_id: { required: true, message: 'Passenger is required', validator: (rule, value) => value !== null && value !== undefined, trigger: ['change', 'blur'] },
     customer_charge: { required: true, validator: (rule: any, value: number) => value !== null && value !== undefined && value >= 0, message: 'Customer charge must be a positive number', trigger: ['blur', 'input'] },
     customer_payment_mode: { required: true, message: 'Payment mode is required', trigger: ['change'] },
     date: { required: true, validator: (_rule: any, value: any) => !!value, message: 'Date is required', trigger: ['change', 'blur'] },
@@ -469,7 +470,7 @@ const submitForm = async () => {
       message.success(`${props.isVisaManagement ? 'Visa' : 'Ticket'} booked!`);
       // Bulk add mode logic: reset specific fields, don't close modal
       if (localBulkAddMode.value) {
-        const fieldsToReset = ['passenger_id'];
+        const fieldsToReset = ['passenger_id', 'customer_id', 'agent_id', 'customer_paid','agent_paid'];
         fieldsToReset.forEach(key => {
           currentRecord.value[key] = null;
         });

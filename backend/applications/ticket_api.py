@@ -16,7 +16,8 @@ class TicketResource(Resource, CommonBookingResource):
     def get(self):
         export_format = request.args.get('export')
         if export_format in ['excel', 'pdf']:
-            return self._export_tickets(export_format)
+            # Correctly call the export method from the parent class
+            return self.export_excel_pdf(self.MODEL, 'ticket')
         
         status = request.args.get('status')
         start_date = request.args.get('start_date')
@@ -33,7 +34,6 @@ class TicketResource(Resource, CommonBookingResource):
             except ValueError:
                 return {'error': 'Invalid date format. Use YYYY-MM-DD.'}, 400
         
-        # Filter by search query
         if search_query:
             search_pattern = f'%{search_query.lower()}%'
             query = query.outerjoin(Customer, self.MODEL.customer_id == Customer.id)\
@@ -43,11 +43,10 @@ class TicketResource(Resource, CommonBookingResource):
                             db.func.lower(Customer.name).like(search_pattern),
                             db.func.lower(Agent.name).like(search_pattern)
                          ))
-
-        # We are fetching ALL tickets for the selected filters
-        tickets = query.order_by(self.MODEL.date.desc()).all()
         
-        # Return the full list of formatted tickets
+        # Default sorting by reference number in descending order
+        tickets = query.order_by(self.MODEL.ref_no.desc()).all()
+        
         return [self._format_ticket(rec) for rec in tickets], 200
 
     @check_permission()
@@ -64,15 +63,18 @@ class TicketResource(Resource, CommonBookingResource):
         if not (record_id := data.get('id')):
             abort(400, "Missing ticket ID")
         
-        return self.update_record(self.MODEL, record_id)
+        # Pass 'ticket' as the ref_type
+        return self.update_record(self.MODEL, record_id, 'ticket')
 
     @check_permission()
     def delete(self):
         if not (record_id := request.args.get('id')):
             abort(400, "Missing ticket ID")
             
+        # Pass 'ticket' as the ref_type
         return self.delete_record(self.MODEL, record_id, 'ticket')
 
+    # The following helper methods are specific to tickets and should be kept
     def book_record(self):
         data = request.json
         required = ['customer_id', 'travel_location_id', 'customer_charge', 'customer_payment_mode']
@@ -108,76 +110,6 @@ class TicketResource(Resource, CommonBookingResource):
         except Exception as e:
             db.session.rollback()
             abort(500, f"Booking failed: {str(e)}")
-
-    def _export_tickets(self, format_type):
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
-        status = request.args.get('status')
-        search_query = request.args.get('search_query', '')
-        
-        query = self.MODEL.query
-        
-        # Filter by status
-        if status and status != 'all':
-            query = query.filter(self.MODEL.status == status)
-
-        # Filter by date range
-        if start_date and end_date:
-            try:
-                start = datetime.strptime(start_date, '%Y-%m-%d')
-                end = datetime.strptime(end_date, '%Y-%m-%d')
-                query = query.filter(self.MODEL.date.between(start, end))
-            except ValueError:
-                return {'error': 'Invalid date format. Use YYYY-MM-DD.'}, 400
-        
-        # Filter by search query
-        if search_query:
-            search_pattern = f'%{search_query.lower()}%'
-            query = query.outerjoin(Customer, self.MODEL.customer_id == Customer.id)\
-                         .outerjoin(Agent, self.MODEL.agent_id == Agent.id)\
-                         .filter(db.or_(
-                            db.func.lower(self.MODEL.ref_no).like(search_pattern),
-                            db.func.lower(Customer.name).like(search_pattern),
-                            db.func.lower(Agent.name).like(search_pattern)
-                         ))
-
-        tickets = query.order_by(self.MODEL.date.desc()).all()
-        
-        formatted_data = [self._format_for_export(t) for t in tickets]
-        
-        if format_type == 'excel':
-            return generate_export_excel(formatted_data, status)
-        
-        elif format_type == 'pdf':
-            pdf_data = [
-                {k: v for k, v in row.items() 
-                 if k not in ['Created At', 'Updated At', 'Updated By']} 
-                for row in formatted_data
-            ]
-            
-            title = "Ticket Export Report (Booked Tickets)" if status == 'booked' else f"Ticket Export Report ({status.capitalize()} Tickets)"
-            date_range_start = start_date or ''
-            date_range_end = end_date or ''
-            
-            summary_totals = {
-                "Total Tickets": len(pdf_data),
-                "Total Customer Charge": sum(t.get('Customer Charge', 0) for t in pdf_data),
-                "Total Agent Paid": sum(t.get('Agent Paid', 0) for t in pdf_data),
-                "Total Profit": sum(t.get('Profit', 0) for t in pdf_data)
-            }
-            if status == 'cancelled':
-                summary_totals["Total Refund Amount"] = sum(t.get('Customer Refund Amount', 0) for t in pdf_data)
-            
-            return generate_export_pdf(
-                data=pdf_data,
-                title=title,
-                date_range_start=date_range_start,
-                date_range_end=date_range_end,
-                summary_totals=summary_totals,
-                status=status
-            )
-        
-        return {'error': 'Invalid export format'}, 400
 
     def _format_ticket(self, ticket):
         return {

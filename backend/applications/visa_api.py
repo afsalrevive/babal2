@@ -16,17 +16,51 @@ class VisaResource(Resource, CommonBookingResource):
     def get(self):
         export_format = request.args.get('export')
         if export_format in ['excel', 'pdf']:
-            return self._export_visas(export_format)
+            # Correctly call the export method from the parent class
+            return self.export_excel_pdf(self.MODEL, 'visa')
 
-        # The front-end now handles filtering by date and search query
-        # so we fetch all records.
-        query = self.MODEL.query.order_by(self.MODEL.date.desc())
-        visas = query.all()
-        
-        # We also need to eager-load the relationships for formatting
-        visas_with_relations = self.MODEL.query.options(db.joinedload(self.MODEL.customer), db.joinedload(self.MODEL.agent), db.joinedload(self.MODEL.visa_type)).order_by(self.MODEL.date.desc()).all()
+        status = request.args.get('status')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        search_query = request.args.get('search_query', '')
 
-        return [self._format_visa(rec) for rec in visas_with_relations], 200
+        # Eager-load all related models
+        query = self.MODEL.query.options(
+            db.joinedload(self.MODEL.customer),
+            db.joinedload(self.MODEL.agent),
+            db.joinedload(self.MODEL.visa_type)
+        )
+
+        # Filter by status if specified
+        if status and status != 'all':
+            query = query.filter(self.MODEL.status == status)
+
+        # Filter by date range
+        if start_date and end_date:
+            try:
+                start = datetime.strptime(start_date, '%Y-%m-%d')
+                end = datetime.strptime(end_date, '%Y-%m-%d')
+                query = query.filter(self.MODEL.date.between(start, end))
+            except ValueError:
+                return {'error': 'Invalid date format. Use YYYY-MM-DD.'}, 400
+
+        # Filter by search query, joining on all relevant tables
+        if search_query:
+            search_pattern = f'%{search_query.lower()}%'
+            query = query.outerjoin(Customer, self.MODEL.customer_id == Customer.id)\
+                         .outerjoin(Agent, self.MODEL.agent_id == Agent.id)\
+                         .outerjoin(VisaType, self.MODEL.visa_type_id == VisaType.id)\
+                         .filter(db.or_(
+                            db.func.lower(self.MODEL.ref_no).like(search_pattern),
+                            db.func.lower(Customer.name).like(search_pattern),
+                            db.func.lower(Agent.name).like(search_pattern),
+                            db.func.lower(VisaType.name).like(search_pattern)
+                         ))
+
+        # Apply default descending sort order
+        visas = query.order_by(self.MODEL.ref_no.desc()).all()
+
+        return [self._format_visa(rec) for rec in visas], 200
 
     @check_permission()
     def post(self, action=None):
@@ -42,19 +76,20 @@ class VisaResource(Resource, CommonBookingResource):
         record_id = data.get('id')
         if not record_id:
             abort(400, "Missing visa ID")
-        return self.update_record(self.MODEL, record_id)
+        # Pass 'visa' as the ref_type
+        return self.update_record(self.MODEL, record_id, 'visa')
 
     @check_permission()
     def delete(self):
         record_id = request.args.get('id')
         if not record_id:
             abort(400, "Missing visa ID")
+        # Pass 'visa' as the ref_type
         return self.delete_record(self.MODEL, record_id, 'visa')
 
-    # Visa-specific methods
+    # The following helper methods are specific to visas and should be kept
     def book_record(self):
         data = request.json
-        # The required fields list is correct
         required_fields = ['customer_id', 'travel_location_id', 'visa_type_id', 'customer_charge', 'customer_payment_mode']
         if not all(field in data for field in required_fields):
             abort(400, "Missing required fields")
@@ -67,7 +102,7 @@ class VisaResource(Resource, CommonBookingResource):
                 agent_id=data.get('agent_id'),
                 travel_location_id=data['travel_location_id'],
                 passenger_id=data.get('passenger_id'),
-                visa_type_id=data['visa_type_id'],  # Now correctly uses visa_type_id
+                visa_type_id=data['visa_type_id'],
                 ref_no=data.get('ref_no') or self._generate_reference_number(),
                 status='booked',
                 customer_charge=data['customer_charge'],
@@ -89,77 +124,6 @@ class VisaResource(Resource, CommonBookingResource):
         except Exception as e:
             db.session.rollback()
             abort(500, f"Booking failed: {str(e)}")
-            
-    def _export_visas(self, format_type):
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
-        status = request.args.get('status')
-        search_query = request.args.get('search_query', '')
-        
-        query = self.MODEL.query
-        
-        # Filter by status
-        if status and status != 'all':
-            query = query.filter(self.MODEL.status == status)
-
-        # Filter by date range
-        if start_date and end_date:
-            try:
-                start = datetime.strptime(start_date, '%Y-%m-%d')
-                end = datetime.strptime(end_date, '%Y-%m-%d')
-                query = query.filter(self.MODEL.date.between(start, end))
-            except ValueError:
-                return {'error': 'Invalid date format. Use YYYY-MM-DD.'}, 400
-        
-        # Filter by search query
-        if search_query:
-            search_pattern = f'%{search_query.lower()}%'
-            query = query.outerjoin(Customer, self.MODEL.customer_id == Customer.id)\
-                         .outerjoin(Agent, self.MODEL.agent_id == Agent.id)\
-                         .filter(db.or_(
-                            db.func.lower(self.MODEL.ref_no).like(search_pattern),
-                            db.func.lower(Customer.name).like(search_pattern),
-                            db.func.lower(Agent.name).like(search_pattern)
-                         ))
-
-        visas = query.order_by(self.MODEL.date.desc()).all()
-        
-        formatted_data = [self._format_for_export(v) for v in visas]
-        
-        if format_type == 'excel':
-            return generate_export_excel(formatted_data, status)
-        
-        elif format_type == 'pdf':
-            # This block is your original PDF generation logic, preserved as requested
-            title = "Visa Export Report (Booked Visas)" if status == 'booked' else f"Visa Export Report ({status.capitalize()} Visas)"
-            date_range_start = start_date or ''
-            date_range_end = end_date or ''
-
-            pdf_data = [
-                {k: v for k, v in row.items() 
-                 if k not in ['Created At', 'Updated At', 'Updated By', 'Visa Type']} 
-                for row in formatted_data
-            ]
-            
-            summary_totals = {
-                "Total Visas": len(pdf_data),
-                "Total Customer Charge": sum(v.get('Customer Charge', 0) for v in pdf_data),
-                "Total Agent Paid": sum(v.get('Agent Paid', 0) for v in pdf_data),
-                "Total Profit": sum(v.get('Profit', 0) for v in pdf_data)
-            }
-            if status == 'cancelled':
-                summary_totals["Total Refund Amount"] = sum(v.get('Customer Refund Amount', 0) for v in pdf_data)
-            
-            return generate_export_pdf(
-                data=pdf_data,
-                title=title,
-                date_range_start=date_range_start,
-                date_range_end=date_range_end,
-                summary_totals=summary_totals,
-                status=status
-            )
-        
-        return {'error': 'Invalid export format'}, 400
 
     def _format_visa(self, visa):
         return {

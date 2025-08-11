@@ -10,57 +10,24 @@ class CommonBookingResource:
         self.MODEL = model
         self.REF_PREFIX = ref_prefix
     
-    def get_records(self, model, ref_type):
-        status = request.args.get('status', 'booked')
-        start_date, end_date = self._parse_date_range()
-        search_query = request.args.get('search_query', '')
-        
-        end_date_plus = end_date + timedelta(days=1)
-        
-        query = model.query.filter(
-            model.date >= start_date,
-            model.date < end_date_plus
-        )
-        
-        if status != 'all':
-            query = query.filter_by(status=status)
-
-        if search_query:
-            search_pattern = f'%{search_query.lower()}%'
-            query = query.join(Customer, isouter=True)\
-                         .join(Agent, isouter=True)\
-                         .filter(db.or_(
-                             db.func.lower(model.ref_no).like(search_pattern),
-                             db.func.lower(Customer.name).like(search_pattern),
-                             db.func.lower(Agent.name).like(search_pattern)
-                         ))
-
-        records = query.all()
-        # This method needs to be implemented in the inheriting class
-        # to format records specific to 'ticket' or 'visa'
-        format_func = getattr(self, f"_format_{ref_type}", None)
-        if format_func:
-            return [format_func(r) for r in records]
-        return abort(500, "Formatter not implemented")
-        
+    # The get_records method has been removed from this class as per the new ticket_api/visa_api implementations.
+    
     def book_record(self):
-        # This method needs to be implemented in the inheriting class
         raise NotImplementedError
         
     def cancel_record(self):
-        # This method needs to be implemented in the inheriting class
         raise NotImplementedError
 
-    def update_record(self, model, record_id):
+    def update_record(self, model, record_id, ref_type):
         obj = model.query.get(record_id)
         if not obj:
-            abort(404, f"{model.__name__} not found")
+            abort(404, f"{ref_type.capitalize()} not found")
 
         data = request.json
         if obj.status == 'cancelled':
-            return self._update_cancelled_record(obj, data)
+            return self._update_cancelled_record(obj, data, ref_type)
         else:
-            return self._update_active_record(obj, data)
+            return self._update_active_record(obj, data, ref_type)
 
     def delete_record(self, model, record_id, ref_type):
         obj = model.query.get(record_id)
@@ -101,7 +68,6 @@ class CommonBookingResource:
             record.updated_at = datetime.now()
             record.updated_by = getattr(g, 'username', 'system')
             
-            # Recalculate net cash impact for the cancellation
             net_amount = 0
             if record.customer_refund_mode in ['cash', 'online']:
                 net_amount -= record.customer_refund_amount
@@ -120,10 +86,13 @@ class CommonBookingResource:
             db.session.rollback()
             abort(500, f"Cancellation failed: {str(e)}")
 
-    def _update_active_record(self, record, data):
+    def _update_active_record(self, record, data, ref_type):
         updated_by = getattr(g, 'username', 'system')
         updates = {
             'travel_location_id': data.get('travel_location_id', record.travel_location_id),
+            'customer_id': data.get('customer_id', record.customer_id),
+            'agent_id': data.get('agent_id', record.agent_id),
+            'visa_type_id': data.get('visa_type_id', record.visa_type_id) if hasattr(record, 'visa_type_id') else None,
             'passenger_id': data.get('passenger_id', record.passenger_id),
             'particular_id': data.get('particular_id', record.particular_id),
             'customer_charge': float(data.get('customer_charge', record.customer_charge)),
@@ -135,26 +104,26 @@ class CommonBookingResource:
             'updated_at': datetime.now()
         }
         
-        if hasattr(record, 'visa_type'):
-            updates['visa_type'] = data.get('visa_type', record.visa_type)
+        if hasattr(record, 'visa_type_id'):
+            updates['visa_type_id'] = data.get('visa_type_id', getattr(record, 'visa_type_id'))
         
         updates['profit'] = updates['customer_charge'] - updates['agent_paid']
 
         try:
-            self._reverse_payments(record)
+            self._reverse_payments(record, ref_type)
 
             for key, value in updates.items():
                 setattr(record, key, value)
             
-            self._process_payments(record, 'update', self.MODEL.__name__.lower())
+            self._process_payments(record, 'update', ref_type)
 
             db.session.commit()
-            return {"message": f"{self.MODEL.__name__} updated successfully"}
+            return {"message": f"{ref_type.capitalize()} updated successfully"}
         except Exception as e:
             db.session.rollback()
             abort(500, f"Update failed: {str(e)}")
 
-    def _update_cancelled_record(self, record, data):
+    def _update_cancelled_record(self, record, data, ref_type):
         new_customer_refund = float(data.get('customer_refund_amount', record.customer_refund_amount))
         new_customer_mode = data.get('customer_refund_mode', record.customer_refund_mode)
         new_agent_recovery = float(data.get('agent_recovery_amount', record.agent_recovery_amount))
@@ -174,9 +143,9 @@ class CommonBookingResource:
                     record.customer_id, 
                     -customer_net_change, 
                     new_customer_mode,
-                    f"Adjustment for {self.MODEL.__name__} {record.id} refund update",
+                    f"Adjustment for {ref_type.capitalize()} {record.id} refund update",
                     ref_no=record.ref_no,
-                    transaction_type=self.MODEL.__name__.lower()
+                    transaction_type=ref_type
                 )
             
             if agent_net_change != 0 and record.agent_id:
@@ -184,9 +153,9 @@ class CommonBookingResource:
                     record.agent_id, 
                     -agent_net_change,
                     new_agent_mode,
-                    f"Adjustment for {self.MODEL.__name__} {record.id} recovery update",
+                    f"Adjustment for {ref_type.capitalize()} {record.id} recovery update",
                     ref_no=record.ref_no,
-                    transaction_type=self.MODEL.__name__.lower()
+                    transaction_type=ref_type
                 )
             
             record.customer_refund_amount = new_customer_refund
@@ -201,7 +170,7 @@ class CommonBookingResource:
         except Exception as e:
             db.session.rollback()
             abort(500, f"Failed to update cancelled record: {str(e)}")
-
+            
     def _delete_cancelled_record(self, record, ref_type):
         customer_net_effect = record.customer_charge - record.customer_refund_amount
         agent_net_effect = record.agent_paid - record.agent_recovery_amount
@@ -234,8 +203,6 @@ class CommonBookingResource:
             if mode == 'wallet':
                 customer.wallet_balance += amount
             elif mode in ['cash', 'online']:
-                # Note: amount is positive for credit, negative for debit.
-                # In common_booking_resource, `_update_company_account` handles signs.
                 self._update_company_account(mode, -amount, 'adjustment', description, ref_no=ref_no, transaction_type=transaction_type)
 
     def _adjust_agent_balance(self, agent_id, amount, mode, description, ref_no=None, transaction_type='generic'):
@@ -294,7 +261,6 @@ class CommonBookingResource:
                                              ref_no=obj.ref_no, transaction_type=ref_type)
 
     def _get_account_mode(self, obj):
-        # Determine payment mode for company account transaction
         modes = [
             getattr(obj, 'customer_payment_mode', None),
             getattr(obj, 'agent_payment_mode', None) if getattr(obj, 'agent_id', None) else None,
@@ -428,15 +394,15 @@ class CommonBookingResource:
         start_date, end_date = self._parse_date_range()
         search_query = request.args.get('search_query', '')
         end_date_plus = end_date + timedelta(days=1)
-        
+
         query = model.query.filter(
             model.date >= start_date,
             model.date < end_date_plus
         )
-        
+
         if status != 'all':
             query = query.filter_by(status=status)
-            
+
         if search_query:
             search_pattern = f'%{search_query.lower()}%'
             query = query.join(Customer, isouter=True)\
@@ -446,17 +412,17 @@ class CommonBookingResource:
                              db.func.lower(Customer.name).like(search_pattern),
                              db.func.lower(Agent.name).like(search_pattern)
                          ))
-            
+
         records = query.all()
-        # This method needs to be implemented in the inheriting class
         format_func = getattr(self, f"_format_for_export", None)
         if format_func:
             data = [format_func(r) for r in records]
         else:
             return abort(500, "Formatter not implemented")
-        
+
         if export_format == 'excel':
-            return generate_export_excel(data=data, status=status, filename_prefix=ref_type)
+            # CHANGE IS HERE
+            return generate_export_excel(data=data, status=status, transaction_type=ref_type)
         elif export_format == 'pdf':
             return generate_export_pdf(
                 data=data,
@@ -470,6 +436,7 @@ class CommonBookingResource:
         else:
             abort(400, "Invalid export format")
 
+            
     def get_summary_totals(self, data, status):
         money_cols = ['Customer Charge', 'Agent Paid', 'Profit']
         if status == 'cancelled':

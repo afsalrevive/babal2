@@ -1,9 +1,9 @@
 <template>
-  <n-modal 
-    v-model:show="modalVisible" 
+  <n-modal
+    v-model:show="modalVisible"
     :teleported="false"
-    :title="editMode ? `Edit ${toSentenceCase(entityType)}` : `Add ${toSentenceCase(entityType)}`" 
-    preset="card" 
+    :title="editMode ? `Edit ${toSentenceCase(entityType)}` : `Add ${toSentenceCase(entityType)}`"
+    preset="card"
     class="full-width-modal"
   >
     <n-card class="modal-card">
@@ -24,35 +24,8 @@
             v-for="(defaultVal, key) in defaultFieldsByEntity[entityType]"
             :key="key"
           >
-            <template v-if="!editMode && ['wallet_balance', 'credit_limit', 'credit_used', 'credit_balance', 'allow_negative_wallet'].includes(key)">
-              <PermissionWrapper resource="entity" operation="full">
-                <n-form-item
-                  :prop="key"
-                  :label="toSentenceCase(key)"
-                  :feedback="fieldErrors[key]"
-                  :validation-status="fieldErrors[key] ? 'error' : undefined"
-                >
-                  <template v-if="typeof defaultVal === 'boolean'">
-                    <n-switch v-model:value="currentForm[key]" />
-                  </template>
-                  <template v-else-if="key === 'date_of_birth' || key === 'passport_issue_date' || key === 'passport_expiry'">
-                    <n-date-picker v-model:value="currentForm[key]" type="date" clearable :disabled="shouldDisableFieldInEdit(key)" />
-                  </template>
-                  <template v-else-if="key === 'salutation'">
-                    <n-select v-model:value="currentForm[key]" :options="salutationOptions" placeholder="Select" :disabled="shouldDisableFieldInEdit(key)" filterable />
-                  </template>
-                  <template v-else-if="key === 'nationality' || key === 'country'">
-                    <n-select v-model:value="currentForm[key]" :options="countryOptions" filterable placeholder="Select" :disabled="shouldDisableFieldInEdit(key)" />
-                  </template>
-                  <template v-else-if="typeof defaultVal === 'number'">
-                    <n-input-number v-model:value="currentForm[key]" :disabled="shouldDisableFieldInEdit(key)" />
-                  </template>
-                  <template v-else>
-                    <n-input v-model:value="currentForm[key]" :disabled="shouldDisableFieldInEdit(key)" />
-                  </template>
-                </n-form-item>
-              </PermissionWrapper>
-            </template>
+            <template v-if="!editMode && isCreditField(key) && !authStore.isAdmin"></template>
+            
             <template v-else>
               <n-form-item
                 :prop="key"
@@ -60,27 +33,48 @@
                 :feedback="fieldErrors[key]"
                 :validation-status="fieldErrors[key] ? 'error' : undefined"
               >
-                <template v-if="typeof defaultVal === 'boolean'">
-                  <n-switch v-model:value="currentForm[key]" />
-                </template>
-                <template v-else-if="key === 'date_of_birth' || key === 'passport_issue_date' || key === 'passport_expiry'">
-                  <n-date-picker v-model:value="currentForm[key]" type="date" clearable :disabled="shouldDisableFieldInEdit(key)" />
-                </template>
-                <template v-else-if="key === 'salutation'">
-                  <n-select v-model:value="currentForm[key]" :options="salutationOptions" placeholder="Select" :disabled="shouldDisableFieldInEdit(key)" filterable />
-                </template>
-                <template v-else-if="key === 'nationality' || key === 'country'">
-                  <n-select v-model:value="currentForm[key]" :options="countryOptions" filterable placeholder="Select" :disabled="shouldDisableFieldInEdit(key)" />
-                </template>
-                <template v-else-if="typeof defaultVal === 'number'">
-                  <n-input-number v-model:value="currentForm[key]" :disabled="shouldDisableFieldInEdit(key)" />
-                </template>
-                <template v-else>
-                  <n-input v-model:value="currentForm[key]" :disabled="shouldDisableFieldInEdit(key)" />
-                </template>
+                <div :class="{'greyed-out': shouldBeGreyedOut(key)}">
+                  <template v-if="typeof defaultVal === 'boolean'">
+                    <n-switch v-model:value="currentForm[key]" :disabled="shouldDisableField(key)" />
+                  </template>
+                  <template v-else-if="key === 'date_of_birth' || key === 'passport_issue_date' || key === 'passport_expiry'">
+                    <n-date-picker v-model:value="currentForm[key]" type="date" clearable :disabled="shouldDisableField(key)" />
+                  </template>
+                  <template v-else-if="key === 'salutation'">
+                    <n-select v-model:value="currentForm[key]" :options="salutationOptions" placeholder="Select" :disabled="shouldDisableField(key)" filterable />
+                  </template>
+                  <template v-else-if="key === 'nationality' || key === 'country'">
+                    <n-select v-model:value="currentForm[key]" :options="countryOptions" filterable placeholder="Select" :disabled="shouldDisableField(key)" />
+                  </template>
+                  <template v-else-if="typeof defaultVal === 'number'">
+                    <n-input-number v-model:value="currentForm[key]" :disabled="shouldDisableField(key)" />
+                  </template>
+                  <template v-else>
+                    <n-input v-model:value="currentForm[key]" :disabled="shouldDisableField(key)" />
+                  </template>
+                </div>
               </n-form-item>
             </template>
           </template>
+
+          <template v-if="editMode && entityType === 'agent' && authStore.isAdmin">
+            <n-form-item
+              label="Enhance/Deduct Credit"
+              prop="credit_limit_enhancement"
+            >
+              <n-input-number v-model:value="currentForm.credit_limit_enhancement" placeholder="Enter amount to adjust" />
+            </n-form-item>
+
+            <n-form-item v-if="newCreditLimit !== null" label="New Credit Limit">
+              <n-input
+                :value="newCreditLimit"
+                disabled
+                placeholder="Calculated automatically"
+                style="color: #63e2b7;"
+              />
+            </n-form-item>
+          </template>
+
         </div>
       </n-form>
       <template #footer>
@@ -132,6 +126,7 @@ import {
 import type { FormInst, FormRules } from 'naive-ui'
 import { countries } from 'countries-list'
 import PermissionWrapper from '@/components/PermissionWrapper.vue'
+import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps({
   show: {
@@ -159,6 +154,8 @@ const fieldErrors = ref<Record<string, string>>({})
 const currentForm = ref<Record<string, any>>({})
 const bulkAddMode = ref(false)
 
+const authStore = useAuthStore()
+
 const modalVisible = computed({
   get: () => props.show,
   set: (val) => emits('update:show', val)
@@ -184,11 +181,11 @@ const prepareFormData = (data: any) => {
 watch(() => props.show, (newVal) => {
   if (newVal) {
     if (props.editMode) {
-      currentForm.value = prepareFormData(props.formData);
+      currentForm.value = { ...prepareFormData(props.formData), credit_limit_enhancement: 0 };
     } else {
-      currentForm.value = { 
-        ...defaultFieldsByEntity[props.entityType], 
-        ...prepareFormData(props.formData) 
+      currentForm.value = {
+        ...defaultFieldsByEntity[props.entityType],
+        ...prepareFormData(props.formData)
       };
     }
     fieldErrors.value = {};
@@ -197,6 +194,24 @@ watch(() => props.show, (newVal) => {
     });
   }
 }, { immediate: true });
+
+
+// Watch for changes in credit_limit for agents in add mode to update credit_balance
+watch(() => currentForm.value.credit_limit, (newVal) => {
+  if (!props.editMode && props.entityType === 'agent' && authStore.isAdmin) {
+    currentForm.value.credit_balance = newVal;
+  }
+});
+
+const newCreditLimit = computed(() => {
+  if (props.editMode && props.entityType === 'agent' && authStore.isAdmin && currentForm.value.credit_limit_enhancement !== undefined) {
+    const currentLimit = props.formData.credit_limit || 0;
+    const enhancement = currentForm.value.credit_limit_enhancement || 0;
+    const newLimit = currentLimit + enhancement;
+    return String(Math.max(0, newLimit));
+  }
+  return '';
+});
 
 
 const closeModal = () => {
@@ -225,7 +240,7 @@ const formRules = computed<FormRules>(() => {
   const rules: FormRules = {}
   Object.entries(defaultFieldsByEntity[entity]).forEach(([key, defaultValue]) => {
     if (typeof defaultValue === 'boolean') return
-    if (props.editMode && shouldDisableFieldInEdit(key)) return
+    if (shouldDisableField(key)) return // Use the updated helper function
 
     if (key === 'name') {
       rules[key] = [{ required: true, message: `${toSentenceCase(key)} is required`, trigger: ['input', 'blur'] }]
@@ -235,6 +250,20 @@ const formRules = computed<FormRules>(() => {
       rules[key] = [{ required: false, pattern: /^[A-Z0-9<]{6,20}$/, message: 'Invalid passport number format', trigger: ['blur'] }]
     }
   })
+  if (props.editMode && entity === 'agent' && authStore.isAdmin) {
+      rules.credit_limit_enhancement = [
+        {
+          validator: (rule, value) => {
+            const currentLimit = props.formData.credit_limit;
+            if (value && (currentLimit + value < 0)) {
+              return new Error("Total credit limit cannot be negative.");
+            }
+            return true;
+          },
+          trigger: ['input', 'blur']
+        }
+      ]
+  }
   return rules
 })
 
@@ -246,21 +275,46 @@ const customFieldLabels: Record<string, string> = {
 }
 
 const defaultFieldsByEntity: Record<string, Record<string, any>> = {
-  customer: { name: '', email: '', contact: '', wallet_balance: 0, credit_limit: 0, credit_used: 0, active: true },
-  agent: { name: '', contact: '', email: '', wallet_balance: 0, credit_limit: 0, credit_balance: 0, active: true },
-  partner: { name: '', contact: '', email: '', wallet_balance: 0, active: true, allow_negative_wallet: false },
+  customer: { name: '', email: '', contact: '', credit_limit: 0, credit_used: 0, active: true },
+  agent: { name: '', contact: '', email: '', credit_limit: 0, credit_balance: 0, active: true },
+  partner: { name: '', contact: '', email: '', active: true, allow_negative_wallet: false },
   passenger: { name: '', contact: '', passport_number: '', salutation: '', address: '', city: '', state: '', country: '', zip_code: '', fathers_name: '', mothers_name: '', date_of_birth: null, passport_issue_date: null, passport_expiry: null, nationality: '', active: true },
   travel_location: { name: '', active: true },
   visa_type: { name: '', active: true },
   particular: { name: '', active: true }
 }
 
-const shouldDisableFieldInEdit = (key: string) => {
-  if (!props.editMode) return false
-  const entity = props.entityType
-  if (entity === 'customer' && ['wallet_balance', 'credit_used'].includes(key)) return true
-  if (entity === 'agent' && ['wallet_balance', 'credit_balance'].includes(key)) return true
-  return false
+const isCreditField = (key: string) => {
+  return ['wallet_balance', 'credit_limit', 'credit_used', 'credit_balance', 'allow_negative_wallet'].includes(key);
+}
+
+const shouldBeGreyedOut = (key: string) => {
+  // Always grey out wallet balance, it's handled by transactions
+  if (key === 'wallet_balance') {
+    return true;
+  }
+
+  // Grey out credit-related fields for non-admins, but show them
+  if (isCreditField(key) && !authStore.isAdmin) {
+    return true;
+  }
+  
+  // Grey out customer credit_used and agent credit_balance in add/edit mode
+  if (props.entityType === 'customer' && key === 'credit_used') return true;
+  if (props.entityType === 'agent' && key === 'credit_balance') return true;
+
+  // Do not grey out credit_limit for agents in add mode (it's the only credit field they can enter)
+  if (props.entityType === 'agent' && key === 'credit_limit' && !props.editMode && authStore.isAdmin) return false;
+
+  return false;
+}
+
+const shouldDisableField = (key: string) => {
+  if (props.editMode) {
+    // Disable credit limit field for agents in edit mode
+    if (props.entityType === 'agent' && key === 'credit_limit') return true;
+  }
+  return shouldBeGreyedOut(key);
 }
 
 const toSentenceCase = (s: string) => {
@@ -273,7 +327,7 @@ const processPayload = () => {
   const payload: Record<string, any> = {};
   for (const key in currentForm.value) {
     const value = currentForm.value[key];
-    if (value !== null && value !== undefined) {
+    if (value !== null && value !== undefined && !shouldDisableField(key)) {
       payload[key] = value;
     }
   }
@@ -284,6 +338,14 @@ const processPayload = () => {
       payload[field] = new Date(payload[field]).toISOString().split('T')[0];
     }
   });
+
+  // Handle agent credit enhancement only for admins in edit mode
+  if (props.editMode && props.entityType === 'agent' && authStore.isAdmin && currentForm.value.credit_limit_enhancement !== undefined) {
+    payload.credit_limit = (props.formData.credit_limit || 0) + currentForm.value.credit_limit_enhancement;
+  }
+  
+  delete payload.credit_limit_enhancement;
+  delete payload.wallet_balance; // Ensure wallet_balance is never sent in the payload
 
   return payload;
 };
@@ -325,7 +387,7 @@ const handleBulkAdd = async () => {
 
 const handleApiError = (e: any) => {
   console.error('API Error:', e);
-  fieldErrors.value = {}; 
+  fieldErrors.value = {};
 
   if (e?.response?.data?.field_errors) {
     fieldErrors.value = e.response.data.field_errors;
@@ -341,9 +403,13 @@ const handleApiError = (e: any) => {
   const errorMsg = e?.response?.data?.error || e?.message || 'Unexpected error occurred. Please try again.';
   message.error(errorMsg);
 }
-
 </script>
 
 <style scoped lang="scss">
 @use '@/styles/theme' as *;
+.greyed-out {
+  pointer-events: none;
+  opacity: 0.6;
+  filter: grayscale(1);
+}
 </style>

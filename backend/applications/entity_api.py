@@ -28,11 +28,36 @@ def pre_process_agent(data, is_update=False):
     credit_limit = data.get('credit_limit', 0.0)
 
     if not is_update:
-        # On creation: credit_balance = credit_limit
-        data['credit_balance'] = credit_limit
+        # On creation, set credit_balance equal to credit_limit
+        data['credit_balance'] = max(0, credit_limit)
+        data['credit_limit'] = max(0, credit_limit)
     else:
-        # On update: if wallet_balance becomes negative, adjust credit_balance
-        if wallet_balance < 0:
+        # On update, handle credit_limit changes
+        obj_id = data.get("id")
+        if obj_id:
+            # Import and query the Agent model within the function
+            from applications.model import Agent
+            old_agent = Agent.query.get(obj_id)
+            if old_agent and 'credit_limit' in data:
+                new_credit_limit = max(0, data['credit_limit'])
+                old_credit_limit = old_agent.credit_limit
+                
+                # Calculate the difference
+                credit_limit_diff = new_credit_limit - old_credit_limit
+
+                # Adjust credit_balance based on the change in credit_limit
+                if credit_limit_diff > 0:
+                    # If credit_limit increases, add the difference to credit_balance
+                    data['credit_balance'] = old_agent.credit_balance + credit_limit_diff
+                elif credit_limit_diff < 0:
+                    # If credit_limit decreases, subtract the difference, but not below 0
+                    data['credit_balance'] = max(0, old_agent.credit_balance + credit_limit_diff)
+
+                # Ensure the final credit_limit stored is not negative
+                data['credit_limit'] = new_credit_limit
+
+        # Retain the old logic for updating credit_balance based on negative wallet_balance
+        if 'credit_balance' not in data and wallet_balance < 0:
             data['credit_balance'] = min(abs(wallet_balance), credit_limit)
 
     return data

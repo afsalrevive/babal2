@@ -314,36 +314,12 @@ const referenceNumber = computed(() => {
 });
 
 // A single computed property to filter tickets based on all criteria
-const filteredTickets = computed(() => {
-  const search = searchQuery.value.toLowerCase();
-  const filteredBySearch = allTickets.value.filter(t =>
-    (t.ref_no?.toLowerCase().includes(search) ||
-    (t.agent_name && t.agent_name.toLowerCase().includes(search)) ||
-    (t.customer_name?.toLowerCase().includes(search)))
-  );
-
-  if (!dateRange.value) {
-    return filteredBySearch;
-  }
-
-  const [startTimestamp, endTimestamp] = dateRange.value;
-  const startDate = new Date(startTimestamp);
-  const endDate = new Date(endTimestamp);
-  endDate.setHours(23, 59, 59, 999);
-
-  return filteredBySearch.filter(ticket => {
-    if (!ticket.date) return false;
-    const ticketDate = new Date(ticket.date);
-    return ticketDate >= startDate && ticketDate <= endDate;
-  });
-});
-
 const activeTickets = computed(() => {
-    return filteredTickets.value.filter(t => t.status === 'booked');
+    return allTickets.value.filter(t => t.status === 'booked');
 });
 
 const cancelledTickets = computed(() => {
-    return filteredTickets.value.filter(t => t.status === 'cancelled');
+    return allTickets.value.filter(t => t.status === 'cancelled');
 });
 
 

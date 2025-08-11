@@ -83,9 +83,18 @@ const entries = ref([]);
 const startingBalance = ref(0);
 const endingBalance = ref(0);
 
+
 const columns: DataTableColumns = [
-  { title: "Ref No", key: "Ref No" },
-  { title: "Date", key: "Date" },
+  { 
+    title: "Ref No", 
+    key: "Ref No",
+    sorter: (a, b) => a["Ref No"] > b["Ref No"] ? 1 : -1
+  },
+  { 
+    title: "Date", 
+    key: "Date",
+    sorter: (a, b) => new Date(a["Date"]).getTime() - new Date(b["Date"]).getTime()
+  },
   { title: "Transaction Type", key: "Transaction Type" },
   { title: "Action", key: "Action" },
   { 
