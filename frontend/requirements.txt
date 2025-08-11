@@ -1,0 +1,1 @@
+npm install axios pinia vue-router naive-ui jwt-decode @vicons/ionicons5 dayjs echarts chart.js vue-chartjs jspdf jspdf-autotable xlsx postcss autoprefixer countries-list

@@ -1,12 +1,12 @@
 # applications/attachment_api.py
-from flask import request, abort, g, send_file, current_app
+from flask import request, abort, send_file, current_app
 from flask_restful import Resource
 from applications.model import db, Attachment, Customer, Agent, Partner, Transaction, Ticket, Service, Particular, TravelLocation, Passenger, VisaType
 from applications.utils import check_permission
 import os
 from werkzeug.utils import secure_filename
 from datetime import datetime
-from sqlalchemy import func
+
 
 # Model map for fetching entity/transaction details
 MODEL_MAP = {
@@ -48,35 +48,7 @@ def get_upload_path(parent_type, parent_id):
     os.makedirs(base_folder, exist_ok=True)
     return base_folder
     
-# NEW RESOURCE FOR BATCH ATTACHMENT COUNT FETCHING
-class AttachmentCountsResource(Resource):
-    @check_permission()
-    def get(self, parent_type):
-        # FIX: Use getlist with the correct key and handle potential parsing differences.
-        parent_ids = request.args.getlist('parent_ids') 
-        
-        # Check for both "parent_ids" and "parent_ids[]" just in case.
-        if not parent_ids:
-            parent_ids = request.args.getlist('parent_ids[]')
 
-        if not parent_ids:
-            return {}, 200
-
-        # Fix: Convert the list of string IDs to a list of integers, with error handling.
-        try:
-            int_parent_ids = [int(i) for i in parent_ids]
-        except (ValueError, TypeError):
-            return {"error": "Invalid parent_ids provided. Must be a list of integers."}, 400
-
-        counts = db.session.query(
-            Attachment.parent_id,
-            func.count(Attachment.id)
-        ).filter(
-            Attachment.parent_type == parent_type,
-            Attachment.parent_id.in_(int_parent_ids)
-        ).group_by(Attachment.parent_id).all()
-        
-        return {str(parent_id): count for parent_id, count in counts}, 200
 
 
 class AttachmentResource(Resource):

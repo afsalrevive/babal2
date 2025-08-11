@@ -132,7 +132,7 @@ const currentFormData = ref({});
 const showDeleteModal = ref(false);
 const entityToDeleteId = ref<number | null>(null);
 
-const attachmentCounts = ref({});
+
 const attachmentModalVisible = ref(false);
 const attachmentParentType = ref('');
 const attachmentParentId = ref(null);
@@ -155,33 +155,6 @@ const handleCheck = (rowKeys: number[]) => {
   }
 };
 
-const fetchAttachmentCounts = async () => {
-  // Clear previous counts and check if there's data to process
-  attachmentCounts.value = {};
-  if (!data.value || data.value.length === 0) {
-    return;
-  }
-  
-  // Collect all entity IDs from the current data
-  const parentIds = data.value.map(row => row.id);
-  
-  try {
-    // Make a single API call to the new consolidated endpoint
-    const res = await api.get(`/api/attachments/counts/${activeTab.value}`, {
-      params: { parent_ids: parentIds }
-    });
-    
-    // Update the attachment counts with the response data
-    const counts = res.data || {};
-    for (const id of parentIds) {
-      attachmentCounts.value[id] = counts[id] || 0;
-    }
-
-  } catch (e: any) {
-    console.error('Failed to fetch attachment counts:', e);
-    message.error('Failed to load attachment counts');
-  }
-};
 
 const openAttachmentsModal = (id: number) => {
   attachmentParentType.value = activeTab.value;
@@ -291,8 +264,7 @@ const fetchData = async () => {
     // Reset pagination to page 1 on new data fetch
     pagination.page = 1;
     
-    await fetchAttachmentCounts();
-    
+   
     let keys = Object.keys(defaultFieldsByEntity[activeTab.value]);
     const hiddenFields = ['address', 'fathers_name', 'mothers_name', 'passport_issue_date', 'passport_expiry'];
     keys = keys.filter(k => !hiddenFields.includes(k));
@@ -378,12 +350,11 @@ const fetchData = async () => {
         title: 'Attachments',
         key: 'attachments',
         render(row: any) {
-          const count = attachmentCounts.value[row.id] || 0;
           return h(PermissionWrapper, { resource: 'entity', operation: 'read' }, {
             default: () => h(NButton, {
               size: 'small',
               onClick: () => openAttachmentsModal(row.id)
-            }, { default: () => `Manage (${count})` })
+            }, { default: () => `Manage` })
           });
         }
       }

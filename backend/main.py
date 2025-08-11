@@ -19,7 +19,7 @@ from applications.ticket_api import TicketResource
 from applications.visa_api import VisaResource
 from applications.service_api import ServiceResource
 from applications.dashboard import CompanyBalancesAPI, DashboardMetricsAPI, CustomerWalletCreditAPI, AgentWalletCreditAPI, PartnerWalletCreditAPI
-from applications.attachment_api import AttachmentResource, AttachmentCountsResource
+from applications.attachment_api import AttachmentResource
 from applications.reports_api import  CompanyBalanceReportResource
 from applications.invoice_api import InvoiceListResource, InvoiceStatusResource, InvoiceDownloadResource
 from sqlalchemy import text
@@ -111,7 +111,6 @@ def create_app():
     api.add_resource(AttachmentResource,
                  '/api/attachments/<string:parent_type>/<int:parent_id>',
                  '/api/attachments/<int:attachment_id>') 
-    api.add_resource(AttachmentCountsResource, '/api/attachments/counts/<parent_type>')
     api.add_resource(CompanyBalanceReportResource, '/api/reports/company_balance/<string:mode>')
     api.add_resource(InvoiceListResource, '/api/invoices')
     api.add_resource(InvoiceStatusResource, '/api/invoices/<int:invoice_id>/status')

@@ -273,7 +273,7 @@ const defaultDateRange = computed(() => {
 const attachmentModalVisible = ref(false);
 const attachmentParentType = ref('');
 const attachmentParentId = ref(null);
-const attachmentCounts = ref({});
+
 
 const currentTicket = ref<any>({
   id: null,
@@ -390,12 +390,11 @@ const columnsBooked = ref<DataTableColumns<any>>([
     title: 'Attachments',
     key: 'attachments',
     render(row) {
-      const count = attachmentCounts.value[row.id] || 0;
       return h(PermissionWrapper, { resource: 'ticket', operation: 'read' }, {
         default: () => h(NButton, {
           size: 'small',
           onClick: () => openAttachmentsModal('ticket', row.id),
-        }, { default: () => `Manage (${count})` }),
+        }, { default: () => `Manage` }),
       });
     },
   },
@@ -426,12 +425,11 @@ const columnsCancelled = ref<DataTableColumns<any>>([
     title: 'Attachments',
     key: 'attachments',
     render(row) {
-      const count = attachmentCounts.value[row.id] || 0;
       return h(PermissionWrapper, { resource: 'ticket', operation: 'read' }, {
         default: () => h(NButton, {
           size: 'small',
           onClick: () => openAttachmentsModal('ticket', row.id),
-        }, { default: () => `Manage (${count})` }),
+        }, { default: () => `Manage` }),
       });
     },
   },
@@ -448,7 +446,6 @@ const fetchData = async () => {
     };
     const res = await api.get('/api/tickets', { params });
     allTickets.value = res.data;
-    await fetchAttachmentCounts(allTickets.value);
   } catch (e) {
     message.error('Failed to load tickets');
   } finally {
@@ -516,33 +513,6 @@ const openAttachmentsModal = (type: string, id: number) => {
   attachmentModalVisible.value = true;
 };
 
-const fetchAttachmentCounts = async (rows: any[]) => {
-  // Clear previous counts and check if there's data to process
-  attachmentCounts.value = {};
-  if (!rows || rows.length === 0) {
-    return;
-  }
-  
-  // Collect all ticket IDs from the current data rows
-  const parentIds = rows.map(row => row.id);
-  
-  try {
-    // Make a single API call to the new consolidated endpoint
-    const res = await api.get(`/api/attachments/counts/ticket`, {
-      params: { parent_ids: parentIds }
-    });
-    
-    // Update the attachment counts with the response data
-    const counts = res.data || {};
-    for (const id of parentIds) {
-      attachmentCounts.value[id] = counts[id] || 0;
-    }
-
-  } catch (e: any) {
-    console.error('Failed to fetch attachment counts:', e);
-    message.error('Failed to load attachment counts');
-  }
-};
 
 const generatePlaceholder = () => {
   const year = new Date().getFullYear();

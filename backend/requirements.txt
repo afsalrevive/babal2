@@ -15,5 +15,9 @@ fpdf==1.7.2
 pandas==2.2.2
 XlsxWriter==3.2.0
 
+# PDF Libraries
+reportlab
+PyPDF2
+
 # Optional: included by default in Python but can be pinned
 # logging is part of the standard library; no need to install separately

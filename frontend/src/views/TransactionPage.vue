@@ -258,35 +258,7 @@ const openAttachmentsModal = (type, id) => {
   attachmentModalVisible.value = true
 }
 
-const attachmentCounts = ref({});
 
-const fetchAttachmentCounts = async (rows) => {
-  // Clear previous counts and check if there's data to process
-  attachmentCounts.value = {};
-  if (!rows || rows.length === 0) {
-    return;
-  }
-  
-  // Collect all transaction IDs from the current data rows
-  const parentIds = rows.map(row => row.id);
-  
-  try {
-    // Make a single API call to the new consolidated endpoint
-    const res = await api.get(`/api/attachments/counts/${transactionType.value}`, {
-      params: { parent_ids: parentIds }
-    });
-    
-    // Update the attachment counts with the response data
-    const counts = res.data || {};
-    for (const id of parentIds) {
-      attachmentCounts.value[id] = counts[id] || 0;
-    }
-
-  } catch (e: any) {
-    console.error('Failed to fetch attachment counts:', e);
-    message.error('Failed to load attachment counts');
-  }
-};
 
 // Pagination
 const pagination = reactive({
@@ -937,12 +909,11 @@ const columns = computed(() => {
   key: 'attachments',
   width: 120,
     render(row) {
-      const count = attachmentCounts.value[row.id] || 0;
       return h(PermissionWrapper, { resource: 'transaction', operation: 'read' }, {
         default: () => h(NButton, {
           size: 'small',
           onClick: () => openAttachmentsModal('transaction', row.id)
-        }, { default: () => `Manage (${count})` })
+        }, { default: () => `Manage` })
       })
     }
   }
