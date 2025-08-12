@@ -35,7 +35,8 @@ def adjust_company_balance(mode, amount, direction='out', ref_no=None, transacti
     The new balance is rounded to 2 decimal places to prevent floating-point inaccuracies.
     """
     if not mode:
-        raise ValueError("Missing mode for company balance adjustment.")
+        return
+        # raise ValueError("Missing mode for company balance adjustment.")
 
     if mode not in ['cash', 'online']:
         return
@@ -348,7 +349,7 @@ def revert_wallet_and_company(transaction):
 
     def log_company(mode, direction):
         if not mode:
-            raise ValueError("Missing mode for company balance adjustment during revert.")
+            return
         reverse_direction = 'in' if direction == 'out' else 'out'
         adjust_company_balance(
             mode=mode,
@@ -380,7 +381,8 @@ def revert_wallet_and_company(transaction):
                     apply_credit_wallet_logic(entity, amount, entity_type='partner', mode='deduct')
             
             db.session.add(entity)
-
+        
+        # Check the company_adjusted flag to prevent duplicate entries
         if extra.get("company_adjusted"):
             direction = 'out' if ttype == 'payment' else 'in'
             log_company(mode, direction)
@@ -405,24 +407,31 @@ def revert_wallet_and_company(transaction):
         t_id = extra.get('to_entity_id')
         f_mode = extra.get('mode_for_from')
         t_mode = extra.get('mode_for_to')
+        company_adjusted = extra.get("company_adjusted")
 
         if direction == 'incoming':
             entity = get_entity(f_type, f_id)
             if entity:
-                if f_mode == 'wallet':
+                if extra.get("debited_entity"):
                     apply_credit_wallet_logic(entity, amount, f_type, mode='revert')
                     db.session.add(entity)
-            if f_mode in ['cash', 'online', 'wallet']:
-                log_company(f_mode, direction='in')
+                if extra.get("credited_entity"):
+                    apply_credit_wallet_logic(entity, amount, f_type, mode='deduct')
+                    db.session.add(entity)
+            if company_adjusted:
+                log_company(t_mode, direction='in')
 
         elif direction == 'outgoing':
             entity = get_entity(t_type, t_id)
             if entity:
-                if t_mode == 'wallet':
+                if extra.get("debited_entity"):
                     apply_credit_wallet_logic(entity, amount, t_type, mode='revert')
                     db.session.add(entity)
-            if t_mode in ['cash', 'online', 'wallet']:
-                log_company(t_mode, direction='out')
+                if extra.get("credited_entity"):
+                    apply_credit_wallet_logic(entity, amount, t_type, mode='deduct')
+                    db.session.add(entity)
+            if company_adjusted:
+                log_company(f_mode, direction='out')
 
 
 class TransactionResource(Resource):
@@ -532,7 +541,7 @@ class TransactionResource(Resource):
             amount = data.get('amount')
             if not amount or float(amount) <= 0:
                 return {'error': 'Amount must be greater than 0'}, 400
-
+            
             amount_changed = float(amount) != t.amount
             entities_changed = False
             mode_changed = False
@@ -544,22 +553,27 @@ class TransactionResource(Resource):
                     data.get('to_entity_type') != t.extra_data.get('to_entity_type') or
                     data.get('to_entity_id') != t.extra_data.get('to_entity_id')
                 )
-
             elif t.transaction_type == 'refund':
                 old_from_mode = t.extra_data.get('mode_for_from')
                 old_to_mode = t.extra_data.get('mode_for_to')
                 new_from_mode = data.get('mode_for_from')
                 new_to_mode = data.get('mode_for_to')
                 mode_changed = (old_from_mode != new_from_mode or old_to_mode != new_to_mode)
-
+            else: # For payment and receipt
+                entities_changed = (
+                    data.get('entity_type') != t.entity_type or
+                    data.get('entity_id') != t.entity_id
+                )
+                mode_changed = data.get('mode') != t.mode
+                
+            # Revert old transaction logic. This is the crucial step.
             if amount_changed or entities_changed or mode_changed:
                 revert_wallet_and_company(t)
-            if 'company_adjusted' in t.extra_data:
-                t.extra_data.pop('company_adjusted')
-            if 'credited_entity' in t.extra_data:
-                t.extra_data.pop('credited_entity')
-            if 'debited_entity' in t.extra_data:
-                t.extra_data.pop('debited_entity')
+
+            # Clear old flags before updating the transaction object
+            t.extra_data.pop('company_adjusted', None)
+            t.extra_data.pop('credited_entity', None)
+            t.extra_data.pop('debited_entity', None)
 
             t.amount = float(amount)
             t.description = data.get('description')
@@ -574,12 +588,12 @@ class TransactionResource(Resource):
                     'to_entity_type': data.get('to_entity_type'),
                     'to_entity_id': data.get('to_entity_id')
                 }
-
+                process_wallet_transfer(t)
             elif t.transaction_type == 'refund':
                 direction = data.get('refund_direction')
                 if not direction:
-                    return {'error': 'Refund direction is required'}, 400
-
+                    raise ValueError('Refund direction is required')
+                
                 t.extra_data = {
                     'refund_direction': direction,
                     'deduct_from_account': data.get('deduct_from_account'),
@@ -596,27 +610,24 @@ class TransactionResource(Resource):
                 t.entity_id = None if t.entity_type == 'others' else data.get(
                     'from_entity_id' if direction == 'incoming' else 'to_entity_id'
                 )
-
                 t.mode = data.get(
                     'mode_for_to' if direction == 'incoming' and t.entity_type == 'others'
                     else 'mode_for_from'
                 )
-
-            else:
+                update_wallet_and_company(t)
+            else: # payments and receipts
                 t.entity_type = data.get('entity_type')
                 t.entity_id = data.get('entity_id')
                 t.pay_type = data.get('pay_type')
                 t.mode = data.get('mode')
-
-            if amount_changed or entities_changed or mode_changed:
-                if t.transaction_type == 'wallet_transfer':
-                    process_wallet_transfer(t)
-                else:
-                    update_wallet_and_company(t)
+                update_wallet_and_company(t)
 
             db.session.commit()
             return {'message': 'Transaction updated'}, 200
 
+        except ValueError as e:
+            db.session.rollback()
+            return {'error': str(e)}, 400
         except Exception as e:
             db.session.rollback()
             return {'error': str(e)}, 400
@@ -633,9 +644,13 @@ class TransactionResource(Resource):
             db.session.delete(t)
             db.session.commit()
             return {'message': 'Transaction deleted and balances reverted'}, 200
+        except ValueError as e:
+            db.session.rollback()
+            return {'error': str(e)}, 400
         except Exception as e:
             db.session.rollback()
             return {'error': str(e)}, 400
+            
     def _export_transactions(self, transaction_type, format_type):
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
