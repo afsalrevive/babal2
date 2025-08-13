@@ -47,7 +47,7 @@
 
     <n-data-table 
       :columns="columns" 
-      :data="filteredTransactions" 
+      :data="paginatedTransactions" 
       :loading="loading" 
       striped 
       :pagination="pagination"
@@ -86,6 +86,7 @@
             <div v-if="transactionType === 'payment' || transactionType === 'receipt'" class="form-section">
               <PaymentFormSection 
                 :form="form"
+                :is-editing="isEditing"
                 :transaction-type="transactionType"
                 :entity-type-options="entityTypeOptions"
                 :entity-options="entityOptions"
@@ -109,6 +110,7 @@
             <div v-else-if="transactionType === 'refund'" class="form-section">
               <RefundFormSection 
                 :form="form"
+                :is-editing="isEditing"
                 :entity-type-options="entityTypeOptions"
                 :refund-direction-options="refundDirectionOptions"
                 :company-mode-options="companyModeOptions"
@@ -130,6 +132,7 @@
             <div v-else-if="transactionType === 'wallet_transfer'" class="form-section">
               <WalletTransferFormSection 
                 :form="form"
+                :is-editing="isEditing"
                 :entity-type-options="entityTypeOptions"
                 :from-entity-options="fromEntityOptions"
                 :to-entity-options="toEntityOptions"
@@ -143,7 +146,7 @@
               />
             </div>
             
-            <n-form-item label="Amount" prop="amount">
+            <n-form-item label="Amount" prop="amount" required>
               <n-input-number 
                 v-model:value="form.amount" 
                 :min="0" 
@@ -259,7 +262,6 @@ const openAttachmentsModal = (type, id) => {
 }
 
 
-
 // Pagination
 const pagination = reactive({
   page: 1,
@@ -336,6 +338,7 @@ function assignRefNo(incoming?: string | null) {
 const selectedEntity = computed(() => entityOptions.value.find((e: any) => e.value === form.entity_id))
 const selectedFromEntity = computed(() => fromEntityOptions.value.find((e: any) => e.value === form.from_entity_id))
 const selectedToEntity = computed(() => toEntityOptions.value.find((e: any) => e.value === form.to_entity_id))
+const isEditing = computed(() => editingId.value !== null)
 
 const modalTitle = computed(() => `${editingId.value ? 'Edit' : 'Add'} ${toSentenceCase(transactionType.value)}`)
 const particularOptions = computed(() => particulars.value.map((p: any) => ({ label: p.name, value: p.id })))
@@ -397,24 +400,42 @@ const payTypeOptions = computed(() => {
 })
 
 const showWalletToggle = computed(() => {
-  if (transactionType.value === 'payment')
-    return form.pay_type === 'other_expense' && form.entity_type !== 'others'
-  if (transactionType.value === 'receipt')
-    return form.pay_type === 'other_receipt' && form.entity_type !== 'others'
+  // For payments and receipts, show the toggle if it's 'other_expense' or 'other_receipt'
+  if (transactionType.value === 'payment' || transactionType.value === 'receipt') {
+    const isAgent = form.entity_type === 'agent'
+    const isOtherExpense = form.pay_type === 'other_expense'
+    const isOtherReceipt = form.pay_type === 'other_receipt'
+
+    if (isAgent) {
+      return (transactionType.value === 'payment' && isOtherExpense) || (transactionType.value === 'receipt' && isOtherReceipt)
+    } else {
+      // For customers/partners, only show for other_expense and other_receipt
+      return isOtherExpense || isOtherReceipt
+    }
+  }
   return false
 })
 
 const walletToggleDisabled = computed(() => (
+  // The toggle should be disabled for agent's cash deposits, as it's a fixed logic
   transactionType.value === 'payment' && form.entity_type === 'agent' && form.pay_type === 'cash_deposit'
 ))
 
 const toggleValue = computed(() => {
-  return transactionType.value === 'payment' ? form.deduct_from_account : form.credit_to_account
+  // Correctly map the checkbox value to the form's state
+  if (transactionType.value === 'payment') {
+    // Payment: credit agent, deduct others
+    return form.entity_type === 'agent' ? form.credit_to_account : form.deduct_from_account
+  }
+  // Receipt: deduct agent, credit others
+  return form.entity_type === 'agent' ? form.deduct_from_account : form.credit_to_account
 })
 
 const toggleLabel = computed(() => {
-  if (transactionType.value === 'payment')
+  // Correctly set the label based on the action
+  if (transactionType.value === 'payment') {
     return form.entity_type === 'agent' ? 'Credit to wallet/credit?' : 'Deduct from wallet/credit?'
+  }
   return form.entity_type === 'agent' ? 'Deduct from wallet/credit?' : 'Credit to wallet/credit?'
 })
 
@@ -433,39 +454,51 @@ const formRules = computed<FormRules>(() => {
     }]
   }
   
+  // Payment/Receipt specific rules
+  if (transactionType.value === 'payment' || transactionType.value === 'receipt') {
+    rules.entity_type = [{ required: true, message: 'Entity type required' }]
+    rules.pay_type = [{ required: true, message: 'Payment type required' }]
+    rules.mode = [{ required: true, message: 'Mode required' }]
+    
+    if (form.entity_type !== 'others') {
+      rules.entity_id = [{ required: true, message: 'Entity required' }]
+    }
+  }
+  
+  // Refund specific rules
   if (transactionType.value === 'refund') {
     rules.refund_direction = [{ required: true, message: 'Refund direction required' }]
+    
     if (form.refund_direction === 'incoming') {
       rules.from_entity_type = [{ required: true, message: 'From Entity Type required' }]
       if (form.from_entity_type !== 'others') {
         rules.from_entity_id = [{ required: true, message: 'From Entity required' }]
         rules.mode_for_from = [{ required: true, message: 'From Mode required' }]
       }
-      if (form.from_entity_type === 'others' || form.mode_for_from === 'cash')
+      if (form.from_entity_type === 'others' || form.mode_for_from === 'cash') {
         rules.mode_for_to = [{ required: true, message: 'To Mode required' }]
+      }
     } else {
       rules.to_entity_type = [{ required: true, message: 'To Entity Type required' }]
       rules.mode_for_from = [{ required: true, message: 'From Mode required' }]
-      if (form.to_entity_type !== 'others')
+      if (form.to_entity_type !== 'others') {
         rules.to_entity_id = [{ required: true, message: 'To Entity required' }]
+      }
     }
-  } else if (transactionType.value === 'wallet_transfer') {
+  }
+  
+  // Wallet transfer specific rules
+  if (transactionType.value === 'wallet_transfer') {
     rules.from_entity_type = [{ required: true, message: 'From Entity Type required' }]
     rules.to_entity_type = [{ required: true, message: 'To Entity Type required' }]
-    if (form.from_entity_type !== 'others')
+    if (form.from_entity_type !== 'others') {
       rules.from_entity_id = [{ required: true, message: 'From Entity required' }]
-    if (form.to_entity_type !== 'others')
+    }
+    if (form.to_entity_type !== 'others') {
       rules.to_entity_id = [{ required: true, message: 'To Entity required' }]
-  } else {
-    rules.entity_type = [{ required: true, message: 'Entity type required' }]
-    rules.pay_type = [{ required: true, message: 'Payment type required' }]
-    rules.mode = [{ required: true, message: 'Mode required' }]
-    if (form.entity_type !== 'others')
-      rules.entity_id = [{
-        validator: (rule: any, value: any) => !value ? new Error('Entity required') : true,
-        trigger: ['blur', 'change']
-      }]
+    }
   }
+  
   return rules
 })
 
@@ -594,12 +627,26 @@ const handlePaymentTypeChange = (value: string) => {
 }
 
 const handleToggleValueChange = (value: boolean) => {
-  if (transactionType.value === 'payment') {
-    form.deduct_from_account = value
-  } else {
-    form.credit_to_account = value
-  }
-}
+    if (transactionType.value === 'payment') {
+        // This is for payments to all entities
+        if (form.entity_type === 'agent') {
+            form.credit_to_account = value;
+            form.deduct_from_account = false; // Ensure the other flag is false
+        } else { // Customer/Partner
+            form.deduct_from_account = value;
+            form.credit_to_account = false; // Ensure the other flag is false
+        }
+    } else if (transactionType.value === 'receipt') {
+        // This is for receipts from all entities
+        if (form.entity_type === 'agent') {
+            form.deduct_from_account = value;
+            form.credit_to_account = false; // Ensure the other flag is false
+        } else { // Customer/Partner
+            form.credit_to_account = value;
+            form.deduct_from_account = false; // Ensure the other flag is false
+        }
+    }
+};
 
 // ---- MODAL & SUBMIT ----
 const openAddModal = async (row: any = null) => {
@@ -665,85 +712,94 @@ const getRefundEntityDetails = () => {
 
 const validateAndSubmit = async () => {
   try {
-    await formRef.value?.validate()
+    await formRef.value?.validate();
+    
+    // Ensure that form.amount is a valid positive number before proceeding
     if (form.amount == null || isNaN(Number(form.amount)) || Number(form.amount) <= 0) {
-      message.error('Amount must be a positive number')
-      return
+      message.error('Amount must be a positive number');
+      return;
     }
-    
-    let newBalance = modeBalance.value
-    if (newBalance !== null && form.amount) {
-      let delta = 0
-      if (transactionType.value === 'payment') delta = -form.amount
-      if (transactionType.value === 'receipt') delta = +form.amount
-      if (transactionType.value === 'refund' && form.refund_direction === 'outgoing') delta = -form.amount
-      if (transactionType.value === 'refund' && form.refund_direction === 'incoming') delta = +form.amount
-      newBalance += delta
+
+    // // Add a safety check for company account balance before submission
+    // let newBalance = modeBalance.value;
+    // if (newBalance !== null && form.amount && form.mode) {
+    //   let delta = 0;
+    //   if (transactionType.value === 'payment' && form.mode !== 'wallet') delta = -form.amount;
+    //   if (transactionType.value === 'receipt' && form.mode !== 'wallet') delta = +form.amount;
+    //   if (transactionType.value === 'refund' && form.refund_direction === 'outgoing' && form.mode_for_from !== 'wallet' && form.mode_for_from !== 'service_availed') delta = -form.amount;
+    //   if (transactionType.value === 'refund' && form.refund_direction === 'incoming' && form.mode_for_to !== 'wallet') delta = +form.amount;
+    //   newBalance += delta;
       
-      if (newBalance < 0) {
-        message.warning(`This transaction will make the company account balance negative (${newBalance.toFixed(2)}). Proceed anyway?`)
-      }
-    }
+    //   if (newBalance < 0) {
+    //     if (!confirm(`This transaction will make the company account balance negative (${newBalance.toFixed(2)}). Proceed anyway?`)) {
+    //       return;
+    //     }
+    //   }
+    // }
     
-    await submitTransaction()
+    await submitTransaction();
   } catch (errors) {
-    console.log('Form validation failed', errors)
+    // Validation errors are caught here and stop the submission.
+    message.error('Please fill in all required fields.');
   }
-}
+};
 
 const submitTransaction = async () => {
   try {
-    fieldErrors.value = {}
-    await formRef.value?.validate()
+    fieldErrors.value = {};
     
-    if (form.amount == null || isNaN(Number(form.amount)) || Number(form.amount) <= 0) {
-      message.error('Amount must be a positive number')
-      return
+    // Explicitly validate pay_type and mode for payment/receipt transactions
+    if (transactionType.value === 'payment' || transactionType.value === 'receipt') {
+        if (!form.pay_type || !form.mode) {
+            message.error('Payment Type and Mode of Payment are required.');
+            return;
+        }
     }
-    
+
     const payload: any = {
       ...form,
       transaction_type: transactionType.value,
       pay_type: transactionType.value === 'refund' ? 'refund' : form.pay_type,
+      // Ensure flags are booleans
       credit_to_account: !!form.credit_to_account,
       deduct_from_account: !!form.deduct_from_account
-    }
+    };
     
     if (transactionType.value === 'refund') {
-      Object.assign(payload, getRefundEntityDetails())
-      payload.mode = form.refund_direction === 'incoming' ? form.mode_for_from : form.mode_for_to
+      Object.assign(payload, getRefundEntityDetails());
+      payload.mode = payload.refund_direction === 'incoming' ? payload.mode_for_to : payload.mode_for_from;
     }
     
     if (editingId.value) {
-      await api.put(`/api/transactions/${editingId.value}`, payload)
-      message.success('Transaction updated')
+      await api.put(`/api/transactions/${editingId.value}`, payload);
+      message.success('Transaction updated');
     } else {
-      await api.post(`/api/transactions/${transactionType.value}`, payload)
-      message.success('Transaction added')
+      await api.post(`/api/transactions/${transactionType.value}`, payload);
+      message.success('Transaction added');
     }
     
     if (bulkAddMode.value && !editingId.value) {
-      const fieldsToReset = ['amount', 'description', 'entity_id']
+      const fieldsToReset = ['amount', 'description', 'entity_id'];
       fieldsToReset.forEach(field => {
         form[field] = null;
       });
-      assignRefNo(null)
-      message.info('Form cleared for next entry.')
-      nextTick(() => formRef.value?.restoreValidation?.())
+      assignRefNo(null);
+      message.info('Form cleared for next entry.');
+      nextTick(() => formRef.value?.restoreValidation?.());
     } else {
-      modalVisible.value = false
-      editingId.value = null
-      bulkAddMode.value = false
+      modalVisible.value = false;
+      editingId.value = null;
+      bulkAddMode.value = false;
     }
-    await fetchTransactions()
+    await fetchTransactions();
   } catch (e: any) {
     if (e?.response?.data?.field_errors) {
-      fieldErrors.value = e.response.data.field_errors
+      fieldErrors.value = e.response.data.field_errors;
     } else {
-      message.error(e?.response?.data?.error || 'Failed to submit transaction')
+      message.error(e?.response?.data?.error || 'Failed to submit transaction');
     }
   }
-}
+};
 
 // Function to show the custom delete confirmation modal
 const confirmDelete = (id: number) => {

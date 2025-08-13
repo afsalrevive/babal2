@@ -1,8 +1,9 @@
 <template>
-    <n-form-item label="From Entity Type" prop="from_entity_type">
+    <n-form-item label="From Entity Type" prop="from_entity_type" required>
       <n-select 
         v-model:value="form.from_entity_type" 
-        :options="entityTypeOptions" 
+        :options="entityTypeOptions"
+        :disabled="isEditing"
         @update:value="$emit('refund-entity-change', $event, 'from')"
       />
     </n-form-item>
@@ -17,6 +18,7 @@
           v-model:value="form.from_entity_id"
           :options="fromEntityOptions"
           :loading="fromEntitiesLoading"
+          :disabled="isEditing"
           filterable
           placeholder="Select entity"
         />
@@ -28,10 +30,11 @@
       </n-space>
     </n-form-item>
 
-    <n-form-item label="To Entity Type" prop="to_entity_type">
+    <n-form-item label="To Entity Type" prop="to_entity_type" required>
       <n-select 
         v-model:value="form.to_entity_type" 
-        :options="entityTypeOptions" 
+        :options="entityTypeOptions"
+        :disabled="isEditing"
         @update:value="$emit('refund-entity-change', $event, 'to')"
       />
     </n-form-item>
@@ -46,6 +49,7 @@
           v-model:value="form.to_entity_id"
           :options="toEntityOptions"
           :loading="toEntitiesLoading"
+          :disabled="isEditing"
           filterable
           placeholder="Select entity"
         />
@@ -109,6 +113,10 @@ defineProps({
     required: true
   },
   particularsLoading: {
+    type: Boolean,
+    required: true
+  },
+  isEditing: {
     type: Boolean,
     required: true
   }

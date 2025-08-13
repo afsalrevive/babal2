@@ -1,20 +1,21 @@
 <template>
-    <n-form-item label="Entity Type" prop="entity_type">
+    <n-form-item label="Entity Type" prop="entity_type" required>
       <n-select 
         v-model:value="form.entity_type" 
-        :options="entityTypeOptions" 
+        :options="entityTypeOptions"
+        :disabled="isEditing"
         @update:value="$emit('entity-type-change', $event)"
       />
     </n-form-item>
 
-    <n-form-item label="Entity Name" prop="entity_id">
+    <n-form-item label="Entity Name" prop="entity_id" required>
       <n-space vertical>
         <n-select
           v-model:value="form.entity_id"
           :options="entityOptions"
           :loading="entitiesLoading"
           filterable
-          :disabled="!form.entity_type || form.entity_type === 'others'"
+          :disabled="!form.entity_type || form.entity_type === 'others' || isEditing"
           placeholder="Select entity"
         />
         <n-grid v-if="selectedEntity" :cols="2" x-gap="12" style="margin-top: 8px;">
@@ -35,10 +36,11 @@
       </n-space>
     </n-form-item>
 
-    <n-form-item label="Payment Type" prop="pay_type">
+    <n-form-item label="Payment Type" prop="pay_type" required>
       <n-select 
         v-model:value="form.pay_type" 
-        :options="payTypeOptions" 
+        :options="payTypeOptions"
+        :disabled="isEditing"
         clearable
         @update:value="$emit('payment-type-change', $event)"
       />
@@ -49,17 +51,18 @@
         <n-checkbox 
           :checked="toggleValue" 
           @update:checked="$emit('toggle-value-change', $event)"
-          :disabled="walletToggleDisabled"
+          :disabled="walletToggleDisabled || isEditing"
         >
           {{ toggleLabel }}
         </n-checkbox>
       </n-form-item>
     </template>
 
-    <n-form-item label="Mode of Payment" prop="mode">
+    <n-form-item label="Mode of Payment" prop="mode" required>
       <n-select
         v-model:value="form.mode"
         :options="nonRefundModeOptions"
+        :disabled="isEditing"
         @update:value="$emit('fetch-company-balance', $event)"
       />
     </n-form-item>
@@ -133,6 +136,10 @@ defineProps({
   },
   toggleLabel: {
     type: String,
+    required: true
+  },
+  isEditing: {
+    type: Boolean,
     required: true
   }
 })

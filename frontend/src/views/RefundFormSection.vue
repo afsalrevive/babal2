@@ -1,17 +1,18 @@
 <template>
-    <n-form-item label="Refund Direction" prop="refund_direction">
+    <n-form-item label="Refund Direction" prop="refund_direction" required>
       <n-select
         v-model:value="form.refund_direction"
         :options="refundDirectionOptions"
+        :disabled="isEditing"
       />
     </n-form-item>
 
-    <!-- Company to Entity -->
     <template v-if="form.refund_direction === 'outgoing'">
-      <n-form-item label="To Entity Type" prop="to_entity_type">
+      <n-form-item label="To Entity Type" prop="to_entity_type" required>
         <n-select 
           v-model:value="form.to_entity_type" 
-          :options="entityTypeOptions" 
+          :options="entityTypeOptions"
+          :disabled="isEditing"
           @update:value="$emit('refund-entity-change', $event, 'to')"
         />
       </n-form-item>
@@ -26,6 +27,7 @@
             v-model:value="form.to_entity_id"
             :options="toEntityOptions"
             :loading="toEntitiesLoading"
+            :disabled="isEditing"
             filterable
             placeholder="Select entity"
           />
@@ -47,10 +49,11 @@
         </n-space>
       </n-form-item>
 
-      <n-form-item label="From Mode (Company)" prop="mode_for_from">
+      <n-form-item label="From Mode (Company)" prop="mode_for_from" required>
         <n-select
           v-model:value="form.mode_for_from"
           :options="companyRefundFromModeOptions"
+          :disabled="isEditing"
           placeholder="Company pays via"
         />
       </n-form-item>
@@ -67,14 +70,14 @@
             v-if="['cash', 'online'].includes(form.mode_for_from)"
             label="Deduct from Entity Account?"
           >
-            <n-switch v-model:value="form.deduct_from_account" />
+            <n-switch v-model:value="form.deduct_from_account" :disabled="isEditing" />
           </n-form-item>
 
           <n-form-item
             v-if="form.mode_for_from === 'service_availed'"
             label="Credit to Entity Account?"
           >
-            <n-switch v-model:value="form.credit_to_account" />
+            <n-switch v-model:value="form.credit_to_account" :disabled="isEditing" />
           </n-form-item>
         </template>
 
@@ -82,7 +85,7 @@
           v-if="form.to_entity_type === 'agent'"
           label="Credit Agent Account?"
         >
-          <n-switch v-model:value="form.credit_to_account" />
+          <n-switch v-model:value="form.credit_to_account" :disabled="isEditing" />
         </n-form-item>
 
         <n-form-item v-if="form.to_entity_type === 'others'" label="Note">
@@ -93,12 +96,12 @@
       </template>
     </template>
 
-    <!-- Entity to Company -->
     <template v-else>
-      <n-form-item label="From Entity Type" prop="from_entity_type">
+      <n-form-item label="From Entity Type" prop="from_entity_type" required>
         <n-select 
           v-model:value="form.from_entity_type" 
-          :options="entityTypeOptions" 
+          :options="entityTypeOptions"
+          :disabled="isEditing"
           @update:value="$emit('refund-entity-change', $event, 'from')"
         />
       </n-form-item>
@@ -113,6 +116,7 @@
             v-model:value="form.from_entity_id"
             :options="fromEntityOptions"
             :loading="fromEntitiesLoading"
+            :disabled="isEditing"
             filterable
             placeholder="Select entity"
           />
@@ -143,6 +147,7 @@
           v-model:value="form.mode_for_from"
           :key="`mode-select-${form.from_entity_type}-${entityOptionsReady}`"
           :options="getEntityToCompanyFromModeOptions(form.from_entity_type)"
+          :disabled="isEditing"
           :loading="!entityOptionsReady"
           placeholder="Entity pays via"
         />
@@ -156,6 +161,7 @@
         <n-select
           v-model:value="form.mode_for_to"
           :options="companyModeOptions"
+          :disabled="isEditing"
           placeholder="Company receives via"
         />
       </n-form-item>
@@ -233,6 +239,10 @@ const props = defineProps({
     default: null
   },
   entityOptionsReady: {
+    type: Boolean,
+    required: true
+  },
+  isEditing: {
     type: Boolean,
     required: true
   }
