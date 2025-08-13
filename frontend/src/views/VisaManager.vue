@@ -232,7 +232,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, h, reactive, watch } from 'vue';
-import { useMessage, NButton, NSpace, NForm, NFormItem, NInputNumber, NInput, NSelect, NGrid, NGi, NText, NDatePicker, NModal, NCard, NH2, NH3, NDivider, NAlert, NDataTable, NIcon, NSwitch } from 'naive-ui';
+import { useMessage, NButton, NSpace, NForm, NFormItem, NInputNumber, NInput, NSelect, NGrid, NGi, NText, NDatePicker, NAlert, NModal, NCard, NH3, NIcon, NH2, NSwitch } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
 import api from '@/api';
 import PermissionWrapper from '@/components/PermissionWrapper.vue';
@@ -250,7 +250,7 @@ const defaultEntityName = ref('');
 
 const activeTab = ref('active');
 const searchQuery = ref('');
-const allVisas = ref<any[]>([]); // New reactive variable to hold all visas
+const allVisas = ref<any[]>([]);
 const loading = ref(false);
 const modalVisible = ref(false);
 const cancelModalVisible = ref(false);
@@ -338,11 +338,11 @@ const filteredBySearch = computed(() => {
 
 // Computed properties for active and cancelled visas, now filtered by date range and search
 const filteredActiveVisas = computed(() => {
-    return filterVisasByDate(filteredBySearch.value.filter(v => v.status === 'booked'));
+    return filteredBySearch.value.filter(v => v.status === 'booked');
 });
 
 const filteredCancelledVisas = computed(() => {
-    return filterVisasByDate(filteredBySearch.value.filter(v => v.status === 'cancelled'));
+    return filteredBySearch.value.filter(v => v.status === 'cancelled');
 });
 
 
@@ -450,13 +450,8 @@ const fetchData = async () => {
     // Make the API call with the filters
     const res = await api.get('/api/visas', { params });
     
-    // Assign the response directly to the active/cancelled visa arrays
-    if (activeTab.value === 'active') {
-      allVisas.value = res.data.filter(v => v.status === 'booked');
-    } else {
-      allVisas.value = res.data.filter(v => v.status === 'cancelled');
-    }
-
+    // Assign the response directly to the all visas array
+    allVisas.value = res.data;
   } catch (e) {
     message.error('Failed to load visas');
   } finally {
@@ -464,7 +459,11 @@ const fetchData = async () => {
   }
 };
 
-const formatDateForAPI = (timestamp: number) => new Date(timestamp).toISOString().split('T')[0];
+const formatDateForAPI = (timestamp: number) => {
+  const date = new Date(timestamp);
+  // Ensure the date is treated as a local date to prevent timezone shifts
+  return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
+};
 
 const exportExcel = async () => {
   try {
@@ -475,6 +474,13 @@ const exportExcel = async () => {
       export: 'excel',
       search_query: searchQuery.value,
     };
+    
+    // Check for empty data before making the API call
+    if (!dateRange.value || (dateRange.value[0] === dateRange.value[1] && allVisas.value.length === 0)) {
+        message.info('No data available in this date range to export.');
+        return;
+    }
+
     const response = await api.get('/api/visas', {
       params,
       responseType: 'blob',
@@ -501,6 +507,13 @@ const exportPDF = async () => {
       export: 'pdf',
       search_query: searchQuery.value,
     };
+    
+    // Check for empty data before making the API call
+    if (!dateRange.value || (dateRange.value[0] === dateRange.value[1] && allVisas.value.length === 0)) {
+        message.info('No data available in this date range to export.');
+        return;
+    }
+
     const response = await api.get('/api/visas', {
       params,
       responseType: 'blob',

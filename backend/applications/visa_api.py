@@ -4,7 +4,7 @@ from flask import request, abort, g
 from flask_restful import Resource
 from applications.utils import check_permission
 from applications.model import db, Customer, Agent, Visa, Particular, TravelLocation, Passenger, VisaType
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from applications.common_booking_resource import CommonBookingResource
 from applications.pdf_excel_export_helpers import generate_export_excel, generate_export_pdf
 
@@ -15,13 +15,9 @@ class VisaResource(Resource, CommonBookingResource):
     @check_permission()
     def get(self):
         export_format = request.args.get('export')
-        if export_format in ['excel', 'pdf']:
-            # Correctly call the export method from the parent class
-            return self.export_excel_pdf(self.MODEL, 'visa')
-
         status = request.args.get('status')
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
+        start_date_str = request.args.get('start_date')
+        end_date_str = request.args.get('end_date')
         search_query = request.args.get('search_query', '')
 
         # Eager-load all related models
@@ -36,10 +32,10 @@ class VisaResource(Resource, CommonBookingResource):
             query = query.filter(self.MODEL.status == status)
 
         # Filter by date range
-        if start_date and end_date:
+        if start_date_str and end_date_str:
             try:
-                start = datetime.strptime(start_date, '%Y-%m-%d')
-                end = datetime.strptime(end_date, '%Y-%m-%d')
+                start = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                end = datetime.strptime(end_date_str, '%Y-%m-%d').date()
                 query = query.filter(self.MODEL.date.between(start, end))
             except ValueError:
                 return {'error': 'Invalid date format. Use YYYY-MM-DD.'}, 400
@@ -59,6 +55,14 @@ class VisaResource(Resource, CommonBookingResource):
 
         # Apply default descending sort order
         visas = query.order_by(self.MODEL.ref_no.desc()).all()
+        
+        if export_format in ['excel', 'pdf']:
+            formatted_data = [self._format_for_export(rec) for rec in visas]
+            if export_format == 'excel':
+                return generate_export_excel(formatted_data, 'visa')
+            if export_format == 'pdf':
+                title = f"{status.capitalize()} Visas"
+                return generate_export_pdf(formatted_data, title, start_date_str, end_date_str, status='visa')
 
         return [self._format_visa(rec) for rec in visas], 200
 
@@ -94,9 +98,12 @@ class VisaResource(Resource, CommonBookingResource):
         if not all(field in data for field in required_fields):
             abort(400, "Missing required fields")
 
-        visa_date = datetime.strptime(data.get('date'), '%Y-%m-%d') if data.get('date') else datetime.now()
+        visa_date = self._parse_date(data.get('date'))
         
         try:
+            customer_charge = float(data['customer_charge'])
+            agent_paid = float(data.get('agent_paid', 0))
+
             visa = self.MODEL(
                 customer_id=data['customer_id'],
                 agent_id=data.get('agent_id'),
@@ -105,9 +112,10 @@ class VisaResource(Resource, CommonBookingResource):
                 visa_type_id=data['visa_type_id'],
                 ref_no=data.get('ref_no') or self._generate_reference_number(),
                 status='booked',
-                customer_charge=data['customer_charge'],
-                agent_paid=data.get('agent_paid', 0),
-                profit=data['customer_charge'] - data.get('agent_paid', 0),
+                customer_charge=customer_charge,
+                agent_paid=agent_paid,
+                # Correctly calculate and round profit
+                profit=round(customer_charge - agent_paid, 2),
                 customer_payment_mode=data['customer_payment_mode'].lower().strip(),
                 agent_payment_mode=data.get('agent_payment_mode', 'wallet').lower().strip(),
                 updated_by=getattr(g, 'username', 'system'),
@@ -187,6 +195,14 @@ class VisaResource(Resource, CommonBookingResource):
         })
         
         return data
+
+    def _parse_date(self, date_str):
+        if date_str:
+            try:
+                return datetime.strptime(date_str, '%Y-%m-%d').date()
+            except ValueError:
+                abort(400, "Invalid date format. Use YYYY-MM-DD.")
+        return date.today()
 
     def _generate_reference_number(self):
         current_year = datetime.now().year

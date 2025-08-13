@@ -113,7 +113,7 @@
             <n-form-item label="Refund Amount">
               <n-input-number v-model:value="cancelData.customer_refund_amount" :min="0" />
             </n-form-item>
-            
+
             <n-form-item label="Refund Mode">
               <n-select
                 v-model:value="cancelData.customer_refund_mode"
@@ -122,7 +122,7 @@
               />
             </n-form-item>
           </div>
-          
+
           <n-space class="action-buttons" justify="end">
             <n-button @click="cancelModalVisible = false">Cancel</n-button>
             <PermissionWrapper resource="service" operation="modify">
@@ -132,7 +132,7 @@
         </n-form>
       </n-card>
     </n-modal>
-    
+
     <n-modal v-model:show="editCancelledModalVisible" class="transaction-modal">
       <n-card class="modal-card">
         <n-h2 class="modal-title">Edit Cancelled Service #{{ currentService.ref_no }}</n-h2>
@@ -142,7 +142,7 @@
             <n-form-item label="Refund Amount">
               <n-input-number v-model:value="currentService.customer_refund_amount" :min="0" />
             </n-form-item>
-            
+
             <n-form-item label="Refund Mode">
               <n-select
                 v-model:value="currentService.customer_refund_mode"
@@ -151,7 +151,7 @@
               />
             </n-form-item>
           </div>
-          
+
           <n-space class="action-buttons" justify="end">
             <n-button @click="editCancelledModalVisible = false">Cancel</n-button>
             <PermissionWrapper resource="service" operation="modify">
@@ -161,7 +161,7 @@
         </n-form>
       </n-card>
     </n-modal>
-    
+
     <n-modal v-model:show="showDeleteModal" :mask-closable="false" preset="dialog" title="Confirm Deletion">
       <n-alert type="warning">
         Are you sure you want to delete this service? This action cannot be undone.
@@ -281,21 +281,21 @@ const selectedCustomer = computed(() => {
 
 const generatePlaceholder = () => {
   const year = new Date().getFullYear();
-  const yearServices = services.value.filter(s => 
+  const yearServices = services.value.filter(s =>
     s.ref_no && s.ref_no.startsWith(`${year}/S/`)
   );
-  
+
   if (yearServices.length === 0) return `${year}/S/00001`;
-  
+
   const lastNum = yearServices.reduce((max, service) => {
     const parts = service.ref_no.split('/');
     if (parts.length < 3) return max;
-    
+
     const numPart = parts[2];
     const num = parseInt(numPart) || 0;
     return Math.max(max, num);
   }, 0);
-  
+
   return `${year}/S/${(lastNum + 1).toString().padStart(5, '0')}`;
 };
 
@@ -309,13 +309,13 @@ const referenceNumber = computed(() => {
 
 const filterServicesByDate = (servicesList: any[]) => {
   if (!dateRange.value) return servicesList;
-  
+
   const [startTimestamp, endTimestamp] = dateRange.value;
   const startDate = new Date(startTimestamp);
   const endDate = new Date(endTimestamp);
-  
+
   endDate.setHours(23, 59, 59, 999);
-  
+
   return servicesList.filter(service => {
     if (!service.date) return false;
     const serviceDate = new Date(service.date);
@@ -365,7 +365,7 @@ const fetchData = async () => {
       start_date: dateRange.value?.[0] ? formatDateForAPI(dateRange.value[0]) : undefined,
       end_date: dateRange.value?.[1] ? formatDateForAPI(dateRange.value[1]) : undefined,
     }
-    
+
     const res = await api.get('/api/services', { params })
     services.value = res.data
   } catch (e) {
@@ -375,8 +375,10 @@ const fetchData = async () => {
   }
 }
 
+// Corrected function to format date string without timezone issues
 const formatDateForAPI = (timestamp: number) => {
-  return new Date(timestamp).toISOString().split('T')[0]
+  const date = new Date(timestamp);
+  return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
 }
 
 const toSentenceCase = (str: string | null | undefined) => {
@@ -387,25 +389,25 @@ const toSentenceCase = (str: string | null | undefined) => {
 const fetchOptions = async () => {
   try {
     loading.value = true;
-    
+
     const [customers, particulars] = await Promise.all([
       api.get('/api/manage/customer'),
       api.get('/api/manage/particular')
     ]);
-    
-    customerOptions.value = customers.data.map((c: any) => ({ 
-      name: c.name, 
-      id: c.id, 
+
+    customerOptions.value = customers.data.map((c: any) => ({
+      name: c.name,
+      id: c.id,
       wallet_balance: c.wallet_balance,
       credit_used: c.credit_used,
-      credit_limit: c.credit_limit 
+      credit_limit: c.credit_limit
     }));
-    
-    particularOptions.value = particulars.data.map((p: any) => ({ 
-      name: p.name, 
-      id: p.id 
+
+    particularOptions.value = particulars.data.map((p: any) => ({
+      name: p.name,
+      id: p.id
     }));
-    
+
   } catch (e) {
     handleApiError(e);
   } finally {
@@ -415,7 +417,7 @@ const fetchOptions = async () => {
 
 const openAddModal = () => {
   referencePlaceholder.value = generatePlaceholder();
-  
+
   currentService.value = {
     customer_id: null,
     particular_id: null,
@@ -424,7 +426,7 @@ const openAddModal = () => {
     customer_payment_mode: 'cash',
     date: Date.now()
   };
-  
+
   modalVisible.value = true;
   editMode.value = false;
   bulkAddMode.value = false;
@@ -448,11 +450,11 @@ const handleFormSuccess = (event: any) => {
 };
 
 const editService = (service: any) => {
-  currentService.value = { 
+  currentService.value = {
     ...service,
     date: service.date ? new Date(service.date).getTime() : Date.now()
   };
-  
+
   editMode.value = true;
   modalVisible.value = true;
 }
@@ -477,7 +479,7 @@ const openCancelModal = (service: any) => {
 }
 
 const editCancelledService = (service: any) => {
-  currentService.value = { 
+  currentService.value = {
     ...service,
     date: service.date ? new Date(service.date).getTime() : null
   };
@@ -491,7 +493,7 @@ const updateCancelledService = async () => {
       customer_refund_amount: currentService.value.customer_refund_amount,
       customer_refund_mode: currentService.value.customer_refund_mode
     };
-    
+
     await api.patch('/api/services', payload)
     message.success('Cancelled service updated successfully')
     editCancelledModalVisible.value = false
@@ -559,9 +561,9 @@ const baseColumns: DataTableColumns<any> = [
   { title: 'Customer', key: 'customer_name', sorter: (a, b) => a.customer_name.localeCompare(b.customer_name) },
   { title: 'Particular', key: 'particular_name', sorter: (a, b) => a.particular_name.localeCompare(b.particular_name) },
   { title: 'Charge', key: 'customer_charge', sorter: (a, b) => a.customer_charge - b.customer_charge },
-  { 
-    title: 'Payment Mode', 
-    key: 'customer_payment_mode', 
+  {
+    title: 'Payment Mode',
+    key: 'customer_payment_mode',
     render: (row) => toSentenceCase(row.customer_payment_mode)
   }
 ]
@@ -604,8 +606,8 @@ const columnsActive = ref<DataTableColumns<any>>([
 const columnsCancelled = ref<DataTableColumns<any>>([
   ...baseColumns,
   { title: 'Refund Amount', key: 'customer_refund_amount' },
-  { 
-    title: 'Refund Mode', 
+  {
+    title: 'Refund Mode',
     key: 'customer_refund_mode',
     render: (row) => toSentenceCase(row.customer_refund_mode)
   },
@@ -616,16 +618,16 @@ const columnsCancelled = ref<DataTableColumns<any>>([
       if (row.status !== 'cancelled') return null;
       return h(NSpace, { size: 'small' }, () => [
         h(PermissionWrapper, { resource: 'service', operation: 'modify' }, {
-          default: () => h(NButton, { 
-            size: 'small', 
-            onClick: () => editCancelledService(row) 
+          default: () => h(NButton, {
+            size: 'small',
+            onClick: () => editCancelledService(row)
           }, { default: () => 'Edit Refund' })
         }),
         h(PermissionWrapper, { resource: 'service', operation: 'full' }, {
-          default: () => h(NButton, { 
-            size: 'small', 
-            type: 'error', 
-            onClick: () => handleConfirmDelete(row.id) 
+          default: () => h(NButton, {
+            size: 'small',
+            type: 'error',
+            onClick: () => handleConfirmDelete(row.id)
           }, { default: () => 'Delete' })
         })
       ])
@@ -655,16 +657,16 @@ const exportExcel = async () => {
       export: 'excel',
       search_query: searchQuery.value
     }
-    
-    const response = await api.get('/api/services', { 
+
+    const response = await api.get('/api/services', {
       params,
       responseType: 'blob'
     })
-    
+
     const url = window.URL.createObjectURL(new Blob([response.data]))
     const link = document.createElement('a')
-    link.href = url
     const statusType = activeTab.value === 'active' ? 'Active' : 'Cancelled'
+    link.href = url
     link.setAttribute('download', `${statusType}_Services_${new Date().toISOString().slice(0,10)}.xlsx`)
     document.body.appendChild(link)
     link.click()
@@ -683,16 +685,16 @@ const exportPDF = async () => {
       export: 'pdf',
       search_query: searchQuery.value
     }
-    
-    const response = await api.get('/api/services', { 
+
+    const response = await api.get('/api/services', {
       params,
       responseType: 'blob'
     })
-    
+
     const url = window.URL.createObjectURL(new Blob([response.data]))
     const link = document.createElement('a')
-    link.href = url
     const statusType = activeTab.value === 'active' ? 'Active' : 'Cancelled'
+    link.href = url
     link.setAttribute('download', `${statusType}_Services_${new Date().toISOString().slice(0,10)}.pdf`)
     document.body.appendChild(link)
     link.click()

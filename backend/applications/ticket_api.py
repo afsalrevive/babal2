@@ -4,7 +4,7 @@ from flask import request, abort, g
 from flask_restful import Resource
 from applications.utils import check_permission
 from applications.model import db, Customer, Agent, Ticket, Particular, TravelLocation, Passenger
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from applications.pdf_excel_export_helpers import generate_export_excel, generate_export_pdf
 from applications.common_booking_resource import CommonBookingResource
 
@@ -15,21 +15,21 @@ class TicketResource(Resource, CommonBookingResource):
     @check_permission()
     def get(self):
         export_format = request.args.get('export')
-        if export_format in ['excel', 'pdf']:
-            # Correctly call the export method from the parent class
-            return self.export_excel_pdf(self.MODEL, 'ticket')
-        
         status = request.args.get('status')
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
+        start_date_str = request.args.get('start_date')
+        end_date_str = request.args.get('end_date')
         search_query = request.args.get('search_query', '')
         
         query = self.MODEL.query.options(db.joinedload(self.MODEL.customer), db.joinedload(self.MODEL.agent))
 
-        if start_date and end_date:
+        if status and status != 'all':
+            query = query.filter(self.MODEL.status == status)
+
+        if start_date_str and end_date_str:
             try:
-                start = datetime.strptime(start_date, '%Y-%m-%d')
-                end = datetime.strptime(end_date, '%Y-%m-%d')
+                start = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                end = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+                # Correctly filters for the entire date range, inclusive of both start and end dates.
                 query = query.filter(self.MODEL.date.between(start, end))
             except ValueError:
                 return {'error': 'Invalid date format. Use YYYY-MM-DD.'}, 400
@@ -47,6 +47,14 @@ class TicketResource(Resource, CommonBookingResource):
         # Default sorting by reference number in descending order
         tickets = query.order_by(self.MODEL.ref_no.desc()).all()
         
+        if export_format in ['excel', 'pdf']:
+            formatted_data = [self._format_for_export(rec) for rec in tickets]
+            if export_format == 'excel':
+                return generate_export_excel(formatted_data, 'ticket')
+            if export_format == 'pdf':
+                title = f"{status.capitalize()} Tickets"
+                return generate_export_pdf(formatted_data, title, start_date_str, end_date_str, status='ticket')
+
         return [self._format_ticket(rec) for rec in tickets], 200
 
     @check_permission()
@@ -81,9 +89,13 @@ class TicketResource(Resource, CommonBookingResource):
         if not all(field in data for field in required):
             abort(400, "Missing required fields")
 
-        ticket_date = self._parse_ticket_date(data.get('date'))
+        # Parse date to a date object
+        ticket_date = self._parse_date(data.get('date'))
         
         try:
+            customer_charge = float(data['customer_charge'])
+            agent_paid = float(data.get('agent_paid', 0))
+
             ticket = self.MODEL(
                 customer_id=data['customer_id'],
                 agent_id=data.get('agent_id'),
@@ -91,9 +103,10 @@ class TicketResource(Resource, CommonBookingResource):
                 passenger_id=data.get('passenger_id'),
                 ref_no=data.get('ref_no') or self._generate_reference_number(),
                 status='booked',
-                customer_charge=data['customer_charge'],
-                agent_paid=data.get('agent_paid', 0),
-                profit=data['customer_charge'] - data.get('agent_paid', 0),
+                customer_charge=customer_charge,
+                agent_paid=agent_paid,
+                # Correctly calculate and round profit
+                profit=round(customer_charge - agent_paid, 2),
                 customer_payment_mode=data['customer_payment_mode'].lower().strip(),
                 agent_payment_mode=data.get('agent_payment_mode', 'cash').lower().strip(),
                 updated_by=getattr(g, 'username', 'system'),
@@ -126,6 +139,7 @@ class TicketResource(Resource, CommonBookingResource):
             'agent_paid': ticket.agent_paid,
             'profit': ticket.profit,
             'status': ticket.status,
+            # Format date to ISO format for frontend compatibility
             'date': ticket.date.isoformat() if ticket.date else None,
             'customer_payment_mode': ticket.customer_payment_mode,
             'agent_payment_mode': ticket.agent_payment_mode,
@@ -171,13 +185,14 @@ class TicketResource(Resource, CommonBookingResource):
         
         return data
 
-    def _parse_ticket_date(self, date_str):
+    def _parse_date(self, date_str):
         if date_str:
             try:
-                return datetime.strptime(date_str, '%Y-%m-%d')
+                # Convert the date string directly to a date object, not datetime
+                return datetime.strptime(date_str, '%Y-%m-%d').date()
             except ValueError:
                 abort(400, "Invalid date format. Use YYYY-MM-DD.")
-        return datetime.now()
+        return date.today()
 
     def _generate_reference_number(self):
         current_year = datetime.now().year

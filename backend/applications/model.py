@@ -1,5 +1,5 @@
 # applications/model.py
-from datetime import datetime
+from datetime import datetime,date
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -319,7 +319,7 @@ class Ticket(db.Model):
 
     # Ticket status & refund
     status = db.Column(db.String(20), default='booked')
-    date = db.Column(db.DateTime, default=datetime.now)
+    date = db.Column(db.Date, default=date.today)
     ref_no = db.Column(db.String(100), nullable=False)
     
     customer_charge = db.Column(db.Float, nullable=False, default=0.0)
@@ -367,7 +367,7 @@ class Visa(db.Model):
     
     # Financials
     status = db.Column(db.String(20), default='booked')
-    date = db.Column(db.DateTime, default=datetime.now)
+    date = db.Column(db.Date, default=date.today)
     ref_no = db.Column(db.String(100), nullable=False)
     
     customer_charge = db.Column(db.Float, nullable=False, default=0.0)
@@ -451,7 +451,7 @@ class Service(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.Integer, db.ForeignKey('customer.id'), nullable=False)
     particular_id = db.Column(db.Integer, db.ForeignKey('particular.id'), nullable=True)
-    date = db.Column(db.DateTime, default=datetime.now)
+    date = db.Column(db.Date, default=date.today)
     ref_no = db.Column(db.String(100), nullable=False)
     status = db.Column(db.String(20), default='booked')
     

@@ -24,8 +24,11 @@ def generate_export_pdf(data, title, date_range_start, date_range_end, summary_t
         
         if not data:
             # Handle empty data case
-            # ...
-            pdf.cell(0, 10, "No data available", 0, 1, 'C')
+            pdf.set_font("Arial", 'B', 16)
+            pdf.cell(0, 10, title, 0, 1, 'C')
+            pdf.set_font("Arial", size=10)
+            pdf.cell(0, 8, f"Date Range: {date_range_start} to {date_range_end}", 0, 1, 'C')
+            pdf.cell(0, 10, "No data available in this range.", 0, 1, 'C')
             output = BytesIO()
             pdf.output(output, 'S').encode('latin1')
             output.seek(0)
@@ -167,8 +170,9 @@ def generate_export_excel(data, status, transaction_type=None):
     """
     try:
         if not data:
-            return {'error': 'No data to export'}, 404
-        
+            # Handle empty data case for Excel
+            data = [{'Message': 'No data available in this range.'}]
+
         df = pd.DataFrame(data)
         
         output = BytesIO()

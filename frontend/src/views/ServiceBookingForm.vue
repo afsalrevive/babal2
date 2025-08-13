@@ -10,7 +10,7 @@
       <n-form-item label="Reference No">
         <n-input :value="referenceNumber" disabled />
       </n-form-item>
-      
+
       <n-form-item label="Date" path="date">
         <n-date-picker
           v-model:value="form.date"
@@ -19,7 +19,7 @@
           :is-date-disabled="disableFutureDates"
         />
       </n-form-item>
-      
+
       <n-form-item label="Customer" path="customer_id" class="wide-field">
         <n-space vertical>
           <n-select
@@ -40,7 +40,7 @@
           </n-grid>
         </n-space>
       </n-form-item>
-      
+
       <n-form-item label="Particular" path="particular_id">
         <n-select
           v-model:value="form.particular_id"
@@ -51,14 +51,14 @@
           filterable
         />
       </n-form-item>
-      
+
       <n-form-item label="Customer Charge" path="customer_charge">
-        <n-input-number 
-          v-model:value="form.customer_charge" 
-          :min="0" 
+        <n-input-number
+          v-model:value="form.customer_charge"
+          :min="0"
         />
       </n-form-item>
-      
+
       <n-form-item label="Payment Mode" path="customer_payment_mode" class="wide-field">
         <n-select
           v-model:value="form.customer_payment_mode"
@@ -66,7 +66,7 @@
           placeholder="Select Payment Mode"
         />
       </n-form-item>
-      
+
       <n-space class="action-buttons" justify="end">
         <n-button @click="$emit('cancel')">Cancel</n-button>
         <PermissionWrapper resource="service" :operation="editMode ? 'modify' : 'write'">
@@ -175,7 +175,9 @@ const submitForm = async () => {
   try {
     await formRef.value?.validate();
 
-    const formattedDate = new Date(form.date).toISOString().split('T')[0];
+    // Corrected formatting to avoid timezone issues
+    const selectedDate = new Date(form.date);
+    const formattedDate = `${selectedDate.getFullYear()}-${(selectedDate.getMonth() + 1).toString().padStart(2, '0')}-${selectedDate.getDate().toString().padStart(2, '0')}`;
 
     const payload = {
       ...form,
@@ -208,7 +210,7 @@ const handleApiError = (e: any) => {
 // Sync form with parent prop changes
 watch(() => props.formData, (newVal) => {
   if (newVal) {
-    Object.assign(form, { 
+    Object.assign(form, {
       ...newVal,
       date: newVal.date ? new Date(newVal.date).getTime() : Date.now()
     });

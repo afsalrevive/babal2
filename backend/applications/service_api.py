@@ -3,7 +3,7 @@ from flask import request, abort, g
 from flask_restful import Resource
 from applications.utils import check_permission
 from applications.model import db, Customer, Particular, Service, CompanyAccountBalance
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from applications.pdf_excel_export_helpers import generate_export_pdf, generate_export_excel
 
 class ServiceResource(Resource):
@@ -19,11 +19,10 @@ class ServiceResource(Resource):
         status = request.args.get('status', 'booked')
         start_date, end_date = self._parse_date_range()
         search_query = request.args.get('search_query', '')
-        end_date_plus = end_date + timedelta(days=1)
         
+        # --- MODIFIED LOGIC FOR INCLUSIVE DATE RANGE ---
         query = Service.query.filter(
-            Service.date >= start_date,
-            Service.date < end_date_plus
+            Service.date.between(start_date, end_date)
         )
         
         if status != 'all':
@@ -87,16 +86,16 @@ class ServiceResource(Resource):
 
     # ===== PRIVATE HELPER METHODS =====
     def _parse_date_range(self):
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
-        
-        if not start_date or not end_date:
+        start_date_str = request.args.get('start_date')
+        end_date_str = request.args.get('end_date')
+
+        if not start_date_str or not end_date_str:
             end_date = datetime.now().date()
             start_date = end_date - timedelta(days=7)
         else:
-            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
-            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
-        
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+
         return start_date, end_date
 
     def _format_service(self, service):
@@ -109,7 +108,7 @@ class ServiceResource(Resource):
             'particular_name': Particular.query.get(service.particular_id).name if service.particular_id else None,
             'customer_charge': service.customer_charge,
             'status': service.status,
-            'date': service.date.isoformat(),
+            'date': service.date.isoformat() if service.date else None,
             'customer_payment_mode': service.customer_payment_mode,
             'customer_refund_amount': service.customer_refund_amount,
             'customer_refund_mode': service.customer_refund_mode,
@@ -157,6 +156,10 @@ class ServiceResource(Resource):
             'updated_by': updated_by,
             'updated_at': datetime.now()
         }
+        
+        # Ensure incoming date string is correctly converted to a date object
+        if 'date' in data:
+            updates['date'] = datetime.strptime(data['date'], '%Y-%m-%d').date()
 
         try:
             self._reverse_payment(service)
@@ -232,7 +235,7 @@ class ServiceResource(Resource):
     # ===== SERVICE PROCESSING METHODS =====
     def book_service(self):
         data = request.json
-        required = ['customer_id', 'customer_charge', 'customer_payment_mode']
+        required = ['customer_id', 'customer_charge', 'customer_payment_mode', 'date']
         if not all(field in data for field in required):
             abort(400, "Missing required fields")
 
@@ -242,6 +245,7 @@ class ServiceResource(Resource):
                 particular_id=data.get('particular_id'),
                 customer_charge=data['customer_charge'],
                 customer_payment_mode=data['customer_payment_mode'],
+                date=datetime.strptime(data['date'], '%Y-%m-%d').date(), 
                 ref_no=self._generate_reference_number(),
                 updated_by=getattr(g, 'username', 'system')
             )

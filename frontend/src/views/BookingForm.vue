@@ -172,6 +172,7 @@
         :min="0" 
         :step="1"
         suffix="%"
+        @update:value="updateCustomerCharge"
       />
     </n-form-item>
     <n-form-item label="Customer Mode" path="customer_payment_mode" class="wide-field">
@@ -183,8 +184,7 @@
     </n-form-item>
     <n-form-item label="Customer Charge" path="customer_charge">
       <n-input-number 
-        :value="computedCustomerCharge"
-        disabled
+        v-model:value="currentRecord.customer_charge"
         :min="0" 
       />
       <template #feedback>
@@ -319,6 +319,7 @@ const selectedAgent = computed(() => {
   return agentOptions.value.find(a => a.id === currentRecord.value.agent_id);
 });
 
+// Update computed property to not be disabled
 const computedCustomerCharge = computed(() => {
   if (currentRecord.value.agent_paid) {
     const base = currentRecord.value.agent_paid;
@@ -329,8 +330,8 @@ const computedCustomerCharge = computed(() => {
 });
 
 const profit = computed(() => {
-  if (!currentRecord.value.customer_charge) return null;
-  return currentRecord.value.customer_charge - (currentRecord.value.agent_paid || 0);
+  if (currentRecord.value.customer_charge === null || currentRecord.value.agent_paid === null) return null;
+  return (currentRecord.value.customer_charge - currentRecord.value.agent_paid).toFixed(2);
 });
 
 const shouldShowCreatePassenger = computed(() => !!newPassengerName.value && !currentRecord.value.passenger_id);
@@ -341,6 +342,7 @@ const disableFutureDates = (timestamp: number) => timestamp > Date.now();
 
 watch(() => props.formData, (newVal) => {
   if (newVal) {
+    // Set date as a timestamp without converting to a new Date object to avoid timezone issues
     currentRecord.value = { ...newVal, date: newVal.date ? new Date(newVal.date).getTime() : Date.now() };
     if (newVal.agent_paid && newVal.customer_charge) {
       profitPercentage.value = Math.round(((newVal.customer_charge / newVal.agent_paid) - 1) * 100);
@@ -432,12 +434,15 @@ const showPassengerDetails = () => {
 
 const updateCustomerCharge = () => {
   if (currentRecord.value.agent_paid) {
-    currentRecord.value.customer_charge = computedCustomerCharge.value;
+    const calculatedCharge = currentRecord.value.agent_paid * (1 + profitPercentage.value / 100);
+    currentRecord.value.customer_charge = Math.round(calculatedCharge / 5) * 5;
   }
 };
 
 const processPayload = () => {
-  const formattedDate = currentRecord.value.date ? new Date(currentRecord.value.date).toISOString().split('T')[0] : null;
+  // Use a local date string to prevent timezone shifts
+  const formattedDate = currentRecord.value.date ? new Date(currentRecord.value.date).toLocaleDateString('fr-CA').split('T')[0] : null;
+  
   const payload = { 
     ...currentRecord.value,
     customer_id: currentRecord.value.customer_id ? Number(currentRecord.value.customer_id) : null,

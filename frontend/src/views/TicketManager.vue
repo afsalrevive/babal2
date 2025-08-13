@@ -251,7 +251,7 @@ const defaultEntityName = ref('');
 
 const activeTab = ref('active');
 const searchQuery = ref('');
-const allTickets = ref<any[]>([]); // New variable to hold all fetched tickets
+const allTickets = ref<any[]>([]);
 const loading = ref(false);
 const modalVisible = ref(false);
 const cancelModalVisible = ref(false);
@@ -415,9 +415,9 @@ const fetchData = async () => {
   loading.value = true;
   try {
     const params = {
-      // The API now returns all data, filtering is done on the client
       start_date: dateRange.value?.[0] ? formatDateForAPI(dateRange.value[0]) : undefined,
       end_date: dateRange.value?.[1] ? formatDateForAPI(dateRange.value[1]) : undefined,
+      status: activeTab.value === 'active' ? 'booked' : 'cancelled',
       search_query: searchQuery.value,
     };
     const res = await api.get('/api/tickets', { params });
@@ -429,7 +429,11 @@ const fetchData = async () => {
   }
 };
 
-const formatDateForAPI = (timestamp: number) => new Date(timestamp).toISOString().split('T')[0];
+const formatDateForAPI = (timestamp: number) => {
+  const date = new Date(timestamp);
+  // Ensure the date is treated as a local date to prevent timezone shifts
+  return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
+};
 
 const exportExcel = async () => {
   try {
@@ -440,6 +444,13 @@ const exportExcel = async () => {
       export: 'excel',
       search_query: searchQuery.value,
     };
+    
+    // Check for empty data before making the API call
+    if (!dateRange.value || (dateRange.value[0] === dateRange.value[1] && allTickets.value.length === 0)) {
+        message.info('No data available in this date range to export.');
+        return;
+    }
+
     const response = await api.get('/api/tickets', {
       params,
       responseType: 'blob',
@@ -466,6 +477,13 @@ const exportPDF = async () => {
       export: 'pdf',
       search_query: searchQuery.value,
     };
+    
+    // Check for empty data before making the API call
+    if (!dateRange.value || (dateRange.value[0] === dateRange.value[1] && allTickets.value.length === 0)) {
+        message.info('No data available in this date range to export.');
+        return;
+    }
+
     const response = await api.get('/api/tickets', {
       params,
       responseType: 'blob',
