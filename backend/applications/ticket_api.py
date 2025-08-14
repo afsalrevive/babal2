@@ -12,6 +12,9 @@ class TicketResource(Resource, CommonBookingResource):
     def __init__(self, **kwargs):
         super().__init__(model=Ticket, ref_prefix="T")
     
+    def round_to_two(self, value):
+        return round(float(value), 2) if value is not None else 0.0
+    
     @check_permission()
     def get(self):
         export_format = request.args.get('export')
@@ -82,7 +85,7 @@ class TicketResource(Resource, CommonBookingResource):
         # Pass 'ticket' as the ref_type
         return self.delete_record(self.MODEL, record_id, 'ticket')
 
-    # The following helper methods are specific to tickets and should be kept
+    # The following helper methods are specific to tickets and should be kept    
     def book_record(self):
         data = request.json
         required = ['customer_id', 'travel_location_id', 'customer_charge', 'customer_payment_mode']
@@ -103,7 +106,7 @@ class TicketResource(Resource, CommonBookingResource):
                 passenger_id=data.get('passenger_id'),
                 ref_no=data.get('ref_no') or self._generate_reference_number(),
                 status='booked',
-                customer_charge=customer_charge,
+                customer_charge = self.round_to_two(data['customer_charge']),
                 agent_paid=agent_paid,
                 # Correctly calculate and round profit
                 profit=round(customer_charge - agent_paid, 2),
@@ -135,6 +138,7 @@ class TicketResource(Resource, CommonBookingResource):
             'particular_id': ticket.particular_id,
             'travel_location_id': ticket.travel_location_id,
             'passenger_id': ticket.passenger_id,
+            'passenger_name': ticket.passenger.name if ticket.passenger else None,
             'customer_charge': ticket.customer_charge,
             'agent_paid': ticket.agent_paid,
             'profit': ticket.profit,
@@ -184,6 +188,7 @@ class TicketResource(Resource, CommonBookingResource):
         })
         
         return data
+
 
     def _parse_date(self, date_str):
         if date_str:

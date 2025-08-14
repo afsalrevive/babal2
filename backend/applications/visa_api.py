@@ -11,7 +11,9 @@ from applications.pdf_excel_export_helpers import generate_export_excel, generat
 class VisaResource(Resource, CommonBookingResource):
     def __init__(self, **kwargs):
         super().__init__(model=Visa, ref_prefix="V")
-
+    def round_to_two(self, value):
+        return round(float(value), 2) if value is not None else 0.0
+    
     @check_permission()
     def get(self):
         export_format = request.args.get('export')
@@ -112,7 +114,7 @@ class VisaResource(Resource, CommonBookingResource):
                 visa_type_id=data['visa_type_id'],
                 ref_no=data.get('ref_no') or self._generate_reference_number(),
                 status='booked',
-                customer_charge=customer_charge,
+                customer_charge = self.round_to_two(data['customer_charge']),
                 agent_paid=agent_paid,
                 # Correctly calculate and round profit
                 profit=round(customer_charge - agent_paid, 2),
@@ -146,6 +148,7 @@ class VisaResource(Resource, CommonBookingResource):
             'particular_id': visa.particular_id,
             'travel_location_id': visa.travel_location_id,
             'passenger_id': visa.passenger_id,
+            'passenger_name': visa.passenger.name if visa.passenger else None,
             'customer_charge': visa.customer_charge,
             'agent_paid': visa.agent_paid,
             'profit': visa.profit,

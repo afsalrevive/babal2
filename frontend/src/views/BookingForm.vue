@@ -156,7 +156,6 @@
       <n-input-number 
         v-model:value="currentRecord.agent_paid" 
         :min="0" 
-        @update:value="updateCustomerCharge"
       />
     </n-form-item>
     <n-form-item label="Agent Mode" path="agent_payment_mode"  class="wide-field">
@@ -172,7 +171,6 @@
         :min="0" 
         :step="1"
         suffix="%"
-        @update:value="updateCustomerCharge"
       />
     </n-form-item>
     <n-form-item label="Customer Mode" path="customer_payment_mode" class="wide-field">
@@ -282,6 +280,7 @@ const allPassengers = ref<any[]>([]);
 
 const showPassengerDetailsModal = ref(false);
 const selectedPassengerDetails = ref<any>({});
+const preventUpdate = ref(false);
 
 const paymentModeOptions = [
   { label: 'Cash', value: 'cash' },
@@ -319,19 +318,12 @@ const selectedAgent = computed(() => {
   return agentOptions.value.find(a => a.id === currentRecord.value.agent_id);
 });
 
-// Update computed property to not be disabled
-const computedCustomerCharge = computed(() => {
-  if (currentRecord.value.agent_paid) {
-    const base = currentRecord.value.agent_paid;
-    const withProfit = base * (1 + profitPercentage.value / 100);
-    return Math.round(withProfit / 5) * 5;
-  }
-  return currentRecord.value.customer_charge;
-});
-
 const profit = computed(() => {
-  if (currentRecord.value.customer_charge === null || currentRecord.value.agent_paid === null) return null;
-  return (currentRecord.value.customer_charge - currentRecord.value.agent_paid).toFixed(2);
+  if (currentRecord.value.customer_charge === null || currentRecord.value.agent_paid === null) 
+    return null;
+  
+  const calcProfit = currentRecord.value.customer_charge - currentRecord.value.agent_paid;
+  return roundToTwo(calcProfit).toFixed(2);
 });
 
 const shouldShowCreatePassenger = computed(() => !!newPassengerName.value && !currentRecord.value.passenger_id);
@@ -432,13 +424,6 @@ const showPassengerDetails = () => {
   }
 };
 
-const updateCustomerCharge = () => {
-  if (currentRecord.value.agent_paid) {
-    const calculatedCharge = currentRecord.value.agent_paid * (1 + profitPercentage.value / 100);
-    currentRecord.value.customer_charge = Math.round(calculatedCharge / 5) * 5;
-  }
-};
-
 const processPayload = () => {
   // Use a local date string to prevent timezone shifts
   const formattedDate = currentRecord.value.date ? new Date(currentRecord.value.date).toLocaleDateString('fr-CA').split('T')[0] : null;
@@ -450,8 +435,8 @@ const processPayload = () => {
     travel_location_id: currentRecord.value.travel_location_id ? Number(currentRecord.value.travel_location_id) : null,
     passenger_id: currentRecord.value.passenger_id ? Number(currentRecord.value.passenger_id) : null,
     particular_id: currentRecord.value.particular_id ? Number(currentRecord.value.particular_id) : null,
-    customer_charge: Number(currentRecord.value.customer_charge),
-    agent_paid: Number(currentRecord.value.agent_paid || 0),
+    customer_charge: roundToTwo(Number(currentRecord.value.customer_charge)),
+    agent_paid: roundToTwo(Number(currentRecord.value.agent_paid || 0)),
     date: formattedDate
   };
 
@@ -499,6 +484,48 @@ const handleApiError = (e: any) => {
     message.error(errorMsg);
   }
 };
+
+const roundToTwo = (num: number) => {
+  return Math.round((num + Number.EPSILON) * 100) / 100;
+};
+
+// New watch logic to prevent infinite loop
+watch(profitPercentage, (newPercentage) => {
+  if (preventUpdate.value) return;
+  preventUpdate.value = true;
+  
+  if (currentRecord.value.agent_paid !== null && currentRecord.value.agent_paid !== undefined) {
+    const newCharge = currentRecord.value.agent_paid * (1 + newPercentage / 100);
+    // Round to the nearest 5
+    currentRecord.value.customer_charge = Math.round(newCharge / 5) * 5;
+  }
+  
+  nextTick(() => { preventUpdate.value = false; });
+});
+
+watch(() => currentRecord.value.customer_charge, (newCharge) => {
+  if (preventUpdate.value) return;
+  preventUpdate.value = true;
+  
+  if (currentRecord.value.agent_paid !== null && currentRecord.value.agent_paid !== undefined && currentRecord.value.agent_paid !== 0) {
+    const newPercentage = ((newCharge / currentRecord.value.agent_paid) - 1) * 100;
+    profitPercentage.value = roundToTwo(newPercentage);
+  }
+  
+  nextTick(() => { preventUpdate.value = false; });
+});
+
+watch(() => currentRecord.value.agent_paid, (newAgentPaid) => {
+  if (preventUpdate.value) return;
+  preventUpdate.value = true;
+  
+  if (newAgentPaid !== null && newAgentPaid !== undefined) {
+    const newCharge = newAgentPaid * (1 + profitPercentage.value / 100);
+    currentRecord.value.customer_charge = Math.round(newCharge / 5) * 5;
+  }
+  
+  nextTick(() => { preventUpdate.value = false; });
+});
 
 onMounted(() => {
   fetchOptions();
