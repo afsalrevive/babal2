@@ -11,7 +11,7 @@
         align="center"
         justify="space-between"
         style="margin-bottom: 12px"
-        v-if="!editMode && ['customer', 'agent', 'partner', 'passenger','travel_location','particular', 'visa_type'].includes(entityType)"
+        v-if="!editMode && ['customer', 'agent', 'partner', 'passenger','travel_location','particular','ticket_type', 'visa_type'].includes(entityType)"
       >
         <div style="display: flex; align-items: center; gap: 8px;">
           <n-switch v-model:value="bulkAddMode" />
@@ -271,6 +271,7 @@ const customFieldLabels: Record<string, string> = {
   customer_id: 'Customer',
   is_active: 'Active',
   travel_location: 'Travel Location',
+  ticket_type: 'Ticket Type',
   visa_type: 'Visa Type'
 }
 
@@ -280,6 +281,7 @@ const defaultFieldsByEntity: Record<string, Record<string, any>> = {
   partner: { name: '', contact: '', email: '', active: true, allow_negative_wallet: false },
   passenger: { name: '', contact: '', passport_number: '', salutation: '', address: '', city: '', state: '', country: '', zip_code: '', fathers_name: '', mothers_name: '', date_of_birth: null, passport_issue_date: null, passport_expiry: null, nationality: '', active: true },
   travel_location: { name: '', active: true },
+  ticket_type: { name: '', active: true},
   visa_type: { name: '', active: true },
   particular: { name: '', active: true }
 }

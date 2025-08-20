@@ -47,10 +47,12 @@
 
     <n-data-table 
       :columns="columns" 
-      :data="paginatedTransactions" 
+      :data="transactions" 
       :loading="loading" 
       striped 
       :pagination="pagination"
+      :remote="true"
+      @update:sorter="handleSorterChange"
     />
 
     <n-modal
@@ -76,7 +78,8 @@
         <n-form ref="formRef" :model="form" :rules="formRules">
           <div class="responsive-form-grid">
             <n-form-item label="Reference No">
-              <n-input v-model:value="form.ref_no" disabled />
+              <n-skeleton v-if="refNoLoading" text :width="200" :sharp="false" />
+              <n-input v-else v-model:value="form.ref_no" disabled />
             </n-form-item>
 
             <n-form-item label="Date" prop="transaction_date">
@@ -100,10 +103,16 @@
                 :wallet-toggle-disabled="walletToggleDisabled"
                 :toggle-value="toggleValue"
                 :toggle-label="toggleLabel"
+                :new-particular-name="newParticularName"
+                :should-show-create-particular="shouldShowCreateParticular"
                 @entity-type-change="handleEntityTypeChange"
                 @payment-type-change="handlePaymentTypeChange"
                 @fetch-company-balance="fetchCompanyBalance"
                 @toggle-value-change="handleToggleValueChange"
+                @particular-search="handleParticularSearch"
+                @particular-clear="handleParticularClear"
+                @particular-value-update="handleParticularValueUpdate"
+                @create-particular="handleCreateParticular"
               />
             </div>
 
@@ -125,7 +134,13 @@
                 :company-refund-from-mode-options="companyRefundFromModeOptions"
                 :mode-balance="modeBalance"
                 :entity-options-ready="entityOptionsReady"
+                :new-particular-name="newParticularName"
+                :should-show-create-particular="shouldShowCreateParticular"
                 @refund-entity-change="handleRefundEntityChange"
+                @particular-search="handleParticularSearch"
+                @particular-clear="handleParticularClear"
+                @particular-value-update="handleParticularValueUpdate"
+                @create-particular="handleCreateParticular"
               />
             </div>
 
@@ -142,7 +157,13 @@
                 :selected-to-entity="selectedToEntity"
                 :particular-options="particularOptions"
                 :particulars-loading="particularsLoading"
+                :new-particular-name="newParticularName"
+                :should-show-create-particular="shouldShowCreateParticular"
                 @refund-entity-change="handleRefundEntityChange"
+                @particular-search="handleParticularSearch"
+                @particular-clear="handleParticularClear"
+                @particular-value-update="handleParticularValueUpdate"
+                @create-particular="handleCreateParticular"
               />
             </div>
             
@@ -161,6 +182,7 @@
             </n-form-item>
           </div>
         </n-form>
+      </n-card>
 
         <template #footer>
           <div v-if="form.mode && modeBalance !== null && transactionType !== 'wallet_transfer'">
@@ -174,7 +196,6 @@
             </n-button>
           </n-space>
         </template>
-      </n-card>
     </n-modal>
     
     <n-modal v-model:show="showDeleteModal" :mask-closable="false" preset="dialog" title="Confirm Deletion">
@@ -195,6 +216,14 @@
       @update:show="attachmentModalVisible = $event"
       @attachment-updated="fetchTransactions"
     />
+    
+    <EntityFormModal
+      :show="entityModalVisible"
+      :entity-type="entityToCreate"
+      :form-data="{ name: defaultEntityName }"
+      @update:show="handleEntityModalClose"
+      @entity-created="handleEntityCreated"
+    />
   </n-card>
 </template>
 
@@ -204,11 +233,12 @@ import { useRoute, useRouter } from 'vue-router'
 import api from '@/api'
 import {
   useMessage, NButton, NSpace, NForm, NFormItem, NInput, NInputNumber, NDataTable, NModal,
-  NCard, NTabs, NTabPane, NIcon, NDatePicker, NH2, NH3, NH5, NAlert, NSwitch, NP, NCheckbox
+  NCard, NTabs, NTabPane, NIcon, NDatePicker, NH2, NH3, NH5, NAlert, NSwitch, NP, NCheckbox, NSkeleton, NSelect
 } from 'naive-ui'
 import { DocumentTextOutline } from '@vicons/ionicons5'
 import type { FormRules } from 'naive-ui'
 import AttachmentModal from './AttachmentModal.vue'
+import EntityFormModal from './EntityFormModal.vue'
 
 // Import form sections
 import PaymentFormSection from './PaymentFormSection.vue'
@@ -216,6 +246,19 @@ import RefundFormSection from './RefundFormSection.vue'
 import WalletTransferFormSection from './WalletTransferFormSection.vue'
 
 import PermissionWrapper from '@/components/PermissionWrapper.vue'
+
+// ---- UTILITY FUNCTIONS ----
+function debounce(fn: (...args: any[]) => void, delay: number) {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  return function(this: any, ...args: any[]) {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+    timeoutId = setTimeout(() => {
+      fn.apply(this, args);
+    }, delay);
+  };
+}
 
 // ---- ROUTING AND STATE ----
 const router = useRouter()
@@ -242,7 +285,6 @@ const entityOptions = ref<any[]>([])
 const fromEntityOptions = ref<any[]>([])
 const toEntityOptions = ref<any[]>([])
 const particulars = ref<any[]>([])
-const nextRefNo = ref('')
 const entityOptionsReady = ref(false)
 const refNoLoading = ref(false)
 const bulkAddMode = ref(false)
@@ -255,12 +297,17 @@ const attachmentModalVisible = ref(false)
 const attachmentParentType = ref('')
 const attachmentParentId = ref(null)
 
-const openAttachmentsModal = (type, id) => {
+// NEW: State for on-the-fly entity creation
+const entityModalVisible = ref(false);
+const entityToCreate = ref('');
+const defaultEntityName = ref('');
+const newParticularName = ref('');
+
+const openAttachmentsModal = (type: string, id: number) => {
   attachmentParentType.value = type
   attachmentParentId.value = id
   attachmentModalVisible.value = true
 }
-
 
 // Pagination
 const pagination = reactive({
@@ -268,14 +315,36 @@ const pagination = reactive({
   pageSize: 20,
   showSizePicker: true,
   pageSizes: [10, 20, 50, 100],
+  itemCount: 0, // Will be set from server response
   onChange: (page: number) => {
     pagination.page = page
+    fetchTransactions() // Refetch when page changes
   },
   onUpdatePageSize: (pageSize: number) => {
     pagination.pageSize = pageSize
     pagination.page = 1
+    fetchTransactions() // Refetch when page size changes
   }
 })
+
+const sortKey = ref<string | null>(null)
+const sortOrder = ref<'ascend' | 'descend' | null>(null)
+
+const handleSorterChange = (sorter: any) => {
+  if (sorter) {
+    if (Array.isArray(sorter)) {
+      // Handle multi-column sorting if needed
+    } else {
+      sortKey.value = sorter.columnKey
+      sortOrder.value = sorter.order
+    }
+  } else {
+    sortKey.value = null
+    sortOrder.value = null
+  }
+  pagination.page = 1 // Reset to first page
+  fetchTransactions()
+}
 
 // ---- CONSTANTS ----
 const defaultDateRange = computed(() => {
@@ -306,13 +375,24 @@ const onTabChange = async (type: string) => {
 
 // ---- FORM MODEL & UTILITIES ----
 const defaultFormState = () => ({
-  ref_no: '', transaction_date: Date.now(), amount: null,
-  entity_type: null, entity_id: null, pay_type: null, mode: null,
-  description: '', particular_id: null,
-  refund_direction: null, to_entity_type: null, to_entity_id: null,
-  from_entity_type: null, from_entity_id: null,
-  mode_for_from: null, mode_for_to: null,
-  deduct_from_account: false, credit_to_account: false
+  ref_no: 'Loading reference...', // Default placeholder
+  transaction_date: Date.now(), 
+  amount: null,
+  entity_type: null, 
+  entity_id: null, 
+  pay_type: null, 
+  mode: null,
+  description: '', 
+  particular_id: null,
+  refund_direction: null, 
+  to_entity_type: null, 
+  to_entity_id: null,
+  from_entity_type: null, 
+  from_entity_id: null,
+  mode_for_from: null, 
+  mode_for_to: null,
+  deduct_from_account: false, 
+  credit_to_account: false
 })
 const form = reactive(defaultFormState())
 const resetForm = () => Object.assign(form, defaultFormState())
@@ -320,19 +400,7 @@ const resetForm = () => Object.assign(form, defaultFormState())
 function toSentenceCase(str: string) {
   return str.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
 }
-function padNum(n: number, wid: number = 5) { return String(n).padStart(wid, '0') }
-function generatePlaceholder() {
-  const year = new Date().getFullYear()
-  const prefix = { payment: 'P', receipt: 'R', refund: 'E', wallet_transfer: 'WT' }[transactionType.value]
-  const matches = transactions.value.filter((t: any) => t.ref_no?.startsWith(`${year}/${prefix}/`))
-  const lastNum = matches.reduce((max: number, t: any) => Math.max(max, parseInt((t.ref_no || '').split('/')[2] || '0')), 0)
-  return `${year}/${prefix}/${padNum(lastNum + 1)}`
-}
-function assignRefNo(incoming?: string | null) {
-  const fallback = generatePlaceholder()
-  form.ref_no = incoming || fallback
-  nextRefNo.value = form.ref_no
-}
+
 
 // ---- COMPUTED PROPERTIES ----
 const selectedEntity = computed(() => entityOptions.value.find((e: any) => e.value === form.entity_id))
@@ -342,40 +410,8 @@ const isEditing = computed(() => editingId.value !== null)
 
 const modalTitle = computed(() => `${editingId.value ? 'Edit' : 'Add'} ${toSentenceCase(transactionType.value)}`)
 const particularOptions = computed(() => particulars.value.map((p: any) => ({ label: p.name, value: p.id })))
-
-const filteredTransactions = computed(() => {
-  let filtered = transactions.value;
-
-  if (searchQuery.value) {
-    const q = searchQuery.value.toLowerCase();
-    filtered = filtered.filter(t => 
-      ['ref_no', 'entity_name', 'particular_name'].some(field => 
-        String(t[field]).toLowerCase().includes(q)
-      )
-    );
-  }
-
-  if (dateRange.value) {
-    const [startTimestamp, endTimestamp] = dateRange.value;
-    const startDate = new Date(startTimestamp);
-    const endDate = new Date(endTimestamp);
-    endDate.setHours(23, 59, 59, 999);
-
-    filtered = filtered.filter(t => {
-      if (!t.date) return false;
-      const tDate = new Date(t.date);
-      return tDate >= startDate && tDate <= endDate;
-    });
-  }
-  
-  return filtered;
-});
-
-const paginatedTransactions = computed(() => {
-  const start = (pagination.page - 1) * pagination.pageSize
-  const end = start + pagination.pageSize
-  return filteredTransactions.value.slice(start, end)
-})
+// NEW: Computed property for the create particular button
+const shouldShowCreateParticular = computed(() => !!newParticularName.value && !particulars.value.some(p => p.name.toLowerCase() === newParticularName.value.toLowerCase()));
 
 const companyRefundFromModeOptions = computed(() => {
   const base = [...companyModeOptions]
@@ -459,7 +495,8 @@ const formRules = computed<FormRules>(() => {
     rules.entity_type = [{ required: true, message: 'Entity type required' }]
     rules.pay_type = [{ required: true, message: 'Payment type required' }]
     rules.mode = [{ required: true, message: 'Mode required' }]
-    
+    rules.particular_id = [{ required: true, message: 'Particular is required', validator: (_rule: any, value: any) => !!value, trigger: ['change', 'blur'] }];
+
     if (form.entity_type !== 'others') {
       rules.entity_id = [{ required: true, message: 'Entity required' }]
     }
@@ -468,7 +505,8 @@ const formRules = computed<FormRules>(() => {
   // Refund specific rules
   if (transactionType.value === 'refund') {
     rules.refund_direction = [{ required: true, message: 'Refund direction required' }]
-    
+    rules.particular_id = [{ required: true, message: 'Particular is required', validator: (_rule: any, value: any) => !!value, trigger: ['change', 'blur'] }];
+
     if (form.refund_direction === 'incoming') {
       rules.from_entity_type = [{ required: true, message: 'From Entity Type required' }]
       if (form.from_entity_type !== 'others') {
@@ -491,6 +529,8 @@ const formRules = computed<FormRules>(() => {
   if (transactionType.value === 'wallet_transfer') {
     rules.from_entity_type = [{ required: true, message: 'From Entity Type required' }]
     rules.to_entity_type = [{ required: true, message: 'To Entity Type required' }]
+    rules.particular_id = [{ required: true, message: 'Particular is required', validator: (_rule: any, value: any) => !!value, trigger: ['change', 'blur'] }];
+
     if (form.from_entity_type !== 'others') {
       rules.from_entity_id = [{ required: true, message: 'From Entity required' }]
     }
@@ -559,38 +599,52 @@ const loadParticulars = async () => {
 }
 
 const fetchSchema = async () => {
-  refNoLoading.value = true
+  refNoLoading.value = true;
   try {
-    const { data } = await api.get(`/api/transactions/${transactionType.value}?mode=form`)
-    const parsed: any = {}
-    Object.entries(data.default_fields || {}).forEach(([k, v]) => {
-      parsed[k] = (typeof v === 'object' && v && 'value' in v) ? v.value : v
-      if (k.includes('date') && typeof form[k] === 'string') form[k] = +new Date(form[k])
-    })
-    defaultFields.value = parsed
-    assignRefNo(data.ref_no)
+    const { data } = await api.get(`/api/transactions/${transactionType.value}?mode=form`);
+    
+    // Store and update ref_no
+    defaultFields.value = {
+      ...defaultFields.value,
+      ref_no: data.ref_no || null
+    };
+    form.ref_no = data.ref_no || 'Loading reference...';
   } catch (e: any) {
-    message.error(e?.response?.data?.error || 'Failed to load form schema')
-    defaultFields.value = {}
-    assignRefNo(null)
-  } finally { 
-    refNoLoading.value = false 
+    message.error(e?.response?.data?.error || 'Failed to load form schema');
+    defaultFields.value = { ...defaultFields.value, ref_no: null };
+    form.ref_no = 'Failed to load reference';
+  } finally {
+    refNoLoading.value = false;
   }
-}
+};
 
 const fetchTransactions = async () => {
   loading.value = true
   try {
     const params: any = { 
       transaction_type: transactionType.value,
-      start_date: dateRange.value?.[0] ? new Date(dateRange.value[0]).toISOString().split('T')[0] : undefined,
-      end_date: dateRange.value?.[1] ? new Date(dateRange.value[1]).toISOString().split('T')[0] : undefined,
+      page: pagination.page,
+      per_page: pagination.pageSize,
+      search_query: searchQuery.value,
     }
+    
+    // Add date filters if set
+    if (dateRange.value?.[0]) params.start_date = new Date(dateRange.value[0]).toISOString().split('T')[0]
+    if (dateRange.value?.[1]) params.end_date = new Date(dateRange.value[1]).toISOString().split('T')[0]
+    
+    // Add sorting parameters
+    if (sortKey.value && sortOrder.value) {
+      params.sort_by = sortKey.value
+      params.sort_order = sortOrder.value === 'ascend' ? 'asc' : 'desc'
+    }
+
     const res = await api.get(`/api/transactions/${transactionType.value}`, { params })
     transactions.value = res.data.transactions || []
+    pagination.itemCount = res.data.total // Total records from server
   } catch (e: any) {
     message.error(e?.response?.data?.error || 'Failed to fetch transactions')
     transactions.value = []
+    pagination.itemCount = 0
   } finally { 
     loading.value = false 
   }
@@ -648,57 +702,99 @@ const handleToggleValueChange = (value: boolean) => {
     }
 };
 
+// NEW: On-the-fly entity creation handlers
+const openEntityModal = (type: string, defaultName: string) => {
+  entityToCreate.value = type;
+  defaultEntityName.value = defaultName;
+  entityModalVisible.value = true;
+};
+
+const handleParticularSearch = (query: string) => {
+  const existingParticular = particulars.value.find(p => p.name.toLowerCase() === query.toLowerCase());
+  // CRITICAL FIX: If a new query is typed and it's not an exact match, clear the selected ID to allow a new item to be created.
+  if (query.trim() !== '' && !existingParticular) {
+    form.particular_id = null; // This is the key change
+    newParticularName.value = query;
+  } else {
+    newParticularName.value = '';
+  }
+};
+
+const handleParticularClear = () => {
+  newParticularName.value = '';
+  form.particular_id = null;
+};
+
+const handleParticularValueUpdate = (value: number | null) => {
+  form.particular_id = value;
+  // This line is key to resetting the create button state after a selection is made
+  if (value !== null) {
+      newParticularName.value = '';
+  }
+};
+
+const handleCreateParticular = () => {
+  openEntityModal('particular', newParticularName.value);
+};
+
+const handleEntityCreated = async (event: { type: string, data: any }) => {
+  const { type, data } = event;
+  if (type === 'particular') {
+    await loadParticulars();
+    form.particular_id = data.id;
+  }
+  entityModalVisible.value = false;
+};
+
+const handleEntityModalClose = (val: boolean) => {
+  entityModalVisible.value = val;
+};
+
 // ---- MODAL & SUBMIT ----
 const openAddModal = async (row: any = null) => {
-  resetForm()
-  editingId.value = row?.id || null
-  fieldErrors.value = {}
-  bulkAddMode.value = false
+  
+  editingId.value = row?.id || null;
+  fieldErrors.value = {};
+  bulkAddMode.value = false;
+  resetForm();
+  // NEW: Reset particular state
+  newParticularName.value = '';
 
   if (row) {
-    Object.assign(form, row, row.extra_data || {})
-    if (row.timestamp) form.transaction_date = row.timestamp
-    else if (row.date) form.transaction_date = +new Date(row.date)
-    assignRefNo(row.ref_no)
+    // Edit an existing transaction
+    Object.assign(form, row, row.extra_data || {});
+    if (row.timestamp) form.transaction_date = row.timestamp;
+    else if (row.date) form.transaction_date = +new Date(row.date);
     
+
     if (transactionType.value === 'refund') {
-      await loadParticulars()
-      const entType = form.refund_direction === 'incoming' ? form.from_entity_type : form.to_entity_type
+      const entType = form.refund_direction === 'incoming' ? form.from_entity_type : form.to_entity_type;
       if (entType && entType !== 'others') {
-        if (form.refund_direction === 'incoming') await loadEntities(entType, 'from')
-        else await loadEntities(entType, 'to')
+        if (form.refund_direction === 'incoming') await loadEntities(entType, 'from');
+        else await loadEntities(entType, 'to');
       }
-      entityOptionsReady.value = true
+      entityOptionsReady.value = true;
     }
-  } else {
-    Object.entries(defaultFields.value).forEach(([k, v]) => {
-      form[k] = (typeof v === 'object' && v && 'value' in v) ? v.value : v
-      if (k.includes('date') && typeof form[k] === 'string') form[k] = +new Date(form[k])
-    })
-    assignRefNo(null)
-    try {
-      const res = await api.get(`/api/transactions/${transactionType.value}?mode=form`)
-      assignRefNo(res.data.ref_no)
-    } catch {}
+    
+    await fetchSchema();
+
+    if (transactionType.value === 'wallet_transfer') {
+      if (form.from_entity_type && form.from_entity_type !== 'others')
+        await loadEntities(form.from_entity_type, 'from');
+      if (form.to_entity_type && form.to_entity_type !== 'others')
+        await loadEntities(form.to_entity_type, 'to');
+    } else if (form.entity_type && form.entity_type !== 'others') {
+      await loadEntities(form.entity_type, 'default');
+    }
+
+    entityOptionsReady.value = true;
   }
-  
-  await loadParticulars()
-  
-  if (transactionType.value === 'wallet_transfer') {
-    if (form.from_entity_type && form.from_entity_type !== 'others') 
-      await loadEntities(form.from_entity_type, 'from')
-    if (form.to_entity_type && form.to_entity_type !== 'others') 
-      await loadEntities(form.to_entity_type, 'to')
-  } else if (form.entity_type && form.entity_type !== 'others') {
-    await loadEntities(form.entity_type, 'default')
-  }
-  
-  entityOptionsReady.value = true
-  modalVisible.value = true
-}
+  modalVisible.value = true;
+};
 
 const closeModal = () => { 
   modalVisible.value = false
+  resetForm()
   editingId.value = null 
   bulkAddMode.value = false
 }
@@ -719,24 +815,7 @@ const validateAndSubmit = async () => {
       message.error('Amount must be a positive number');
       return;
     }
-
-    // // Add a safety check for company account balance before submission
-    // let newBalance = modeBalance.value;
-    // if (newBalance !== null && form.amount && form.mode) {
-    //   let delta = 0;
-    //   if (transactionType.value === 'payment' && form.mode !== 'wallet') delta = -form.amount;
-    //   if (transactionType.value === 'receipt' && form.mode !== 'wallet') delta = +form.amount;
-    //   if (transactionType.value === 'refund' && form.refund_direction === 'outgoing' && form.mode_for_from !== 'wallet' && form.mode_for_from !== 'service_availed') delta = -form.amount;
-    //   if (transactionType.value === 'refund' && form.refund_direction === 'incoming' && form.mode_for_to !== 'wallet') delta = +form.amount;
-    //   newBalance += delta;
-      
-    //   if (newBalance < 0) {
-    //     if (!confirm(`This transaction will make the company account balance negative (${newBalance.toFixed(2)}). Proceed anyway?`)) {
-    //       return;
-    //     }
-    //   }
-    // }
-    
+ 
     await submitTransaction();
   } catch (errors) {
     // Validation errors are caught here and stop the submission.
@@ -746,30 +825,21 @@ const validateAndSubmit = async () => {
 
 const submitTransaction = async () => {
   try {
-    fieldErrors.value = {};
-    
-    // Explicitly validate pay_type and mode for payment/receipt transactions
-    if (transactionType.value === 'payment' || transactionType.value === 'receipt') {
-        if (!form.pay_type || !form.mode) {
-            message.error('Payment Type and Mode of Payment are required.');
-            return;
-        }
-    }
+    await formRef.value?.validate();
 
     const payload: any = {
       ...form,
       transaction_type: transactionType.value,
       pay_type: transactionType.value === 'refund' ? 'refund' : form.pay_type,
-      // Ensure flags are booleans
       credit_to_account: !!form.credit_to_account,
       deduct_from_account: !!form.deduct_from_account
     };
-    
+
     if (transactionType.value === 'refund') {
       Object.assign(payload, getRefundEntityDetails());
       payload.mode = payload.refund_direction === 'incoming' ? payload.mode_for_to : payload.mode_for_from;
     }
-    
+
     if (editingId.value) {
       await api.put(`/api/transactions/${editingId.value}`, payload);
       message.success('Transaction updated');
@@ -777,20 +847,27 @@ const submitTransaction = async () => {
       await api.post(`/api/transactions/${transactionType.value}`, payload);
       message.success('Transaction added');
     }
-    
+
     if (bulkAddMode.value && !editingId.value) {
-      const fieldsToReset = ['amount', 'description', 'entity_id'];
+      // For bulk add, clear fields and fetch a new ref_no to keep the form ready.
+      const fieldsToReset = ['amount', 'description', 'entity_id', 'particular_id', 'transaction_date'];
       fieldsToReset.forEach(field => {
         form[field] = null;
       });
-      assignRefNo(null);
+      // Set the date to the current time for the next transaction.
+      form.transaction_date = Date.now();
+      // Fetch a fresh reference number from the backend to ensure it's incremented correctly.
+      await fetchSchema();
       message.info('Form cleared for next entry.');
+      // Restore validation state to clear any visual errors from the previous submission.
       nextTick(() => formRef.value?.restoreValidation?.());
     } else {
+      // For single add or editing, close the modal and reset all state.
       modalVisible.value = false;
       editingId.value = null;
       bulkAddMode.value = false;
     }
+    // Fetch the updated list of transactions to reflect the new or edited entry.
     await fetchTransactions();
   } catch (e: any) {
     if (e?.response?.data?.field_errors) {
@@ -877,50 +954,85 @@ const exportTransactions = async (format: 'excel' | 'pdf') => {
 // ---- DATA-TABLE ----
 const columns = computed(() => {
   const baseColumns = [
-    { title: 'Ref No', key: 'ref_no' },
-    { title: 'Date', key: 'date', render: (row: any) => new Date(row.date).toLocaleDateString() },
+    { 
+      title: 'Ref No', 
+      key: 'ref_no',
+      sorter: true,
+      sortOrder: sortKey.value === 'ref_no' ? sortOrder.value : undefined
+    },
+    { 
+      title: 'Date', 
+      key: 'date', 
+      render: (row: any) => new Date(row.date).toLocaleDateString(),
+      sorter: true,
+      sortOrder: sortKey.value === 'date' ? sortOrder.value : undefined
+    },
   ]
   
   if (transactionType.value === 'refund') {
     baseColumns.push({
       title: 'Direction',
       key: 'refund_direction',
-      render: (row: any) => row.refund_direction ? toSentenceCase(row.refund_direction) : ''
+      render: (row: any) => row.refund_direction ? toSentenceCase(row.refund_direction) : '',
+      sorter: true,
+      sortOrder: sortKey.value === 'refund_direction' ? sortOrder.value : undefined
     })
   }
   
   if (transactionType.value === 'wallet_transfer') {
     baseColumns.push(
-      { 
-        title: 'Transfer Direction', 
+      {
+        title: 'Transfer Direction',
         key: 'transfer_direction',
         render: (row: any) => {
           const fromType = row.from_entity_type || row.extra_data?.from_entity_type || ''
           const toType = row.to_entity_type || row.extra_data?.to_entity_type || ''
           return `${toSentenceCase(fromType)} → ${toSentenceCase(toType)}`
-        }
+        },
+        sorter: false // Probably not sortable due to complex render
+        ,
+        sortOrder: 'ascend'
       },
       { 
         title: 'From Entity', 
         key: 'from_entity_name',
-        render: (row: any) => row.from_entity_name || row.extra_data?.from_entity_name || '-' 
+        render: (row: any) => row.from_entity_name || row.extra_data?.from_entity_name || '-',
+        sorter: true,
+        sortOrder: sortKey.value === 'from_entity_name' ? sortOrder.value : undefined
       },
       { 
         title: 'To Entity', 
         key: 'to_entity_name',
-        render: (row: any) => row.to_entity_name || row.extra_data?.to_entity_name || '-' 
+        render: (row: any) => row.to_entity_name || row.extra_data?.to_entity_name || '-',
+        sorter: true,
+        sortOrder: sortKey.value === 'to_entity_name' ? sortOrder.value : undefined
       }
     )
-  }
- else {
+  } else {
     baseColumns.push(
-      { title: 'Entity Type', key: 'entity_type', render: (row: any) => toSentenceCase(row.entity_type || '') },
-      { title: 'Entity Name', key: 'entity_name' }
+      { 
+        title: 'Entity Type', 
+        key: 'entity_type', 
+        render: (row: any) => toSentenceCase(row.entity_type || ''),
+        sorter: true,
+        sortOrder: sortKey.value === 'entity_type' ? sortOrder.value : undefined
+      },
+      { 
+        title: 'Entity Name', 
+        key: 'entity_name',
+        sorter: true,
+        sortOrder: sortKey.value === 'entity_name' ? sortOrder.value : undefined
+      }
     )
   }
 
   baseColumns.push(
-    { title: 'Particular', key: 'particular_name' }
+    { 
+      title: 'Particular', 
+      key: 'particular_name',
+      sorter: true,
+      sortOrder: sortKey.value === 'particular_name' ? sortOrder.value : undefined
+    }
   )
   
   if (transactionType.value !== 'wallet_transfer') {
@@ -928,15 +1040,27 @@ const columns = computed(() => {
       {
         title: 'Payment Type',
         key: 'pay_type',
-        render: (row: any) => row.pay_type ? toSentenceCase(row.pay_type) : ''
+        render: (row: any) => row.pay_type ? toSentenceCase(row.pay_type) : '',
+        sorter: true,
+        sortOrder: sortKey.value === 'pay_type' ? sortOrder.value : undefined
       },
-      { title: 'Mode', key: 'mode', render: (row: any) => toSentenceCase(row.mode || '') }
+      { 
+        title: 'Mode', 
+        key: 'mode', 
+        render: (row: any) => toSentenceCase(row.mode || ''),
+        sorter: true,
+        sortOrder: sortKey.value === 'mode' ? sortOrder.value : undefined
+      }
     )
   }
   
   baseColumns.push(
-    { title: 'Amount', key: 'amount' },
-    { title: 'Description', key: 'description' }
+    { 
+      title: 'Amount', 
+      key: 'amount',
+      sorter: true,
+      sortOrder: sortKey.value === 'amount' ? sortOrder.value : undefined
+    }
   )
 
   const actions = {
@@ -960,11 +1084,12 @@ const columns = computed(() => {
         })
       ])
   }
+  
   const attachmentColumn = {
-  title: 'Attachments',
-  key: 'attachments',
-  width: 120,
-    render(row) {
+    title: 'Attachments',
+    key: 'attachments',
+    width: 120,
+    render(row: any) {
       return h(PermissionWrapper, { resource: 'transaction', operation: 'read' }, {
         default: () => h(NButton, {
           size: 'small',
@@ -974,7 +1099,7 @@ const columns = computed(() => {
     }
   }
   
-  return [...baseColumns,attachmentColumn, actions]
+  return [...baseColumns, attachmentColumn, actions]
 })
 
 // ---- WATCHERS ----
@@ -1007,25 +1132,33 @@ watch(() => [form.from_entity_type, form.to_entity_type], () => {
   }
 })
 
-// Combined watcher for filtering
+// Combined watcher for filtering with debounce
+const debouncedFetchTransactions = debounce(fetchTransactions, 500);
 watch([searchQuery, dateRange], () => {
-  // Reset pagination to page 1 whenever filters change
   pagination.page = 1
-}, { deep: true });
+  debouncedFetchTransactions() // Trigger server fetch with debounce
+}, { deep: true })
 
-// Watch page and pageSize changes to trigger a new fetch
-watch([() => pagination.page, () => pagination.pageSize], () => {
-  // We're intentionally not calling fetchData here, as `paginatedTransactions` is a computed property
-});
+watch(() => transactionType.value, () => {
+  pagination.page = 1
+  sortKey.value = null
+  sortOrder.value = null
+  fetchTransactions()
+})
 
 // ---- LIFECYCLE ----
 onMounted(async () => {
   dateRange.value = defaultDateRange.value
   const typeParam = route.query.type as string
   transactionType.value = tabs.includes(typeParam) ? typeParam as any : 'payment'
-  await fetchSchema()
-  await fetchTransactions()
-  await loadParticulars()
+  
+  // Use Promise.all for concurrent initial fetches
+  await Promise.all([
+    fetchSchema(),
+    fetchTransactions(),
+    loadParticulars(),
+  ])
+  
   if (form.entity_type && form.entity_type !== 'others') {
     await loadEntities(form.entity_type, 'default')
   }

@@ -2,7 +2,7 @@ from flask import request, jsonify, abort
 from flask_restful import Resource
 from sqlalchemy.exc import IntegrityError
 from applications.utils import check_permission
-from applications.model import db, Customer, Agent, Partner, Particular,Passenger, TravelLocation,Ticket, VisaType,Transaction
+from applications.model import db, Customer, Agent, Partner, Particular,Passenger, TravelLocation,Ticket,TicketType, VisaType,Transaction
 import re
 from datetime import datetime,date
 
@@ -12,6 +12,7 @@ MODEL_MAP = {
     "partner": Partner,
     "particular": Particular,
     "passenger": Passenger,
+    "ticket_type": TicketType,
     "visa_type": VisaType,
     "travel_location": TravelLocation
 }
@@ -127,6 +128,7 @@ def validate_entity_input(entity_type, data, is_update=False):
         'partner': ['name'],
         'passenger': ['name'],
         'particular': ['name'],
+        'ticket_type': ['name'],
         'visa_type': ['name'],
         'travel_location': ['name'],
     }

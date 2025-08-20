@@ -32,10 +32,10 @@
           />
           <n-grid v-if="selectedCustomer" :cols="2" x-gap="12">
             <n-gi>
-              <n-text type="info">Wallet: {{ selectedCustomer.wallet_balance }}</n-text>
+              <n-text type="info">Wallet: {{ selectedCustomer.wallet_balance.toFixed(2) }}</n-text>
             </n-gi>
             <n-gi>
-              <n-text type="warning">Credit: {{ selectedCustomer.credit_used }}/{{ selectedCustomer.credit_limit }}</n-text>
+              <n-text type="warning">Credit: {{ selectedCustomer.credit_used.toFixed(2) }}/{{ selectedCustomer.credit_limit.toFixed(2) }}</n-text>
             </n-gi>
           </n-grid>
         </n-space>
@@ -49,6 +49,26 @@
           value-field="id"
           placeholder="Select Particular"
           filterable
+          @search="handleParticularSearch"
+          @update:value="handleParticularValueUpdate"
+        />
+        <n-space v-if="shouldShowCreateParticular" align="center" style="margin-top: 8px;">
+          <n-button 
+            type="primary" 
+            :disabled="!newParticularName" 
+            @click="handleCreateParticular"
+            @mousedown.prevent
+          >
+            Create
+          </n-button>
+        </n-space>
+      </n-form-item>
+
+      <n-form-item label="Description" path="description" class="wide-field">
+        <n-input
+          v-model:value="form.description"
+          type="textarea"
+          placeholder="Enter service details..."
         />
       </n-form-item>
 
@@ -64,6 +84,7 @@
           v-model:value="form.customer_payment_mode"
           :options="paymentModeOptions"
           placeholder="Select Payment Mode"
+          :disabled="editMode"
         />
       </n-form-item>
 
@@ -80,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, reactive } from 'vue';
+import { ref, computed, onMounted, watch, reactive, nextTick } from 'vue';
 import { useMessage, NButton, NSpace, NForm, NFormItem, NSelect, NGrid, NGi, NText, NInput, NDatePicker, NInputNumber, NSwitch } from 'naive-ui';
 import type { FormRules } from 'naive-ui';
 import api from '@/api';
@@ -93,16 +114,23 @@ const props = defineProps({
   referenceNumber: { type: String, required: true },
 });
 
-const emits = defineEmits(['record-booked', 'record-updated', 'cancel', 'update:bulkAddMode']);
+const emits = defineEmits(['record-booked', 'record-updated', 'cancel', 'update:bulkAddMode', 'open-entity-modal']);
 const message = useMessage();
 const formRef = ref<any>(null);
 
-// Form State
-const form = reactive({ ...props.formData });
+const form = reactive({
+  customer_id: props.formData.customer_id ?? null,
+  particular_id: props.formData.particular_id ?? null,
+  ref_no: props.formData.ref_no ?? '',
+  customer_charge: props.formData.customer_charge ?? 0,
+  customer_payment_mode: props.formData.customer_payment_mode ?? 'cash',
+  date: props.formData.date ? new Date(props.formData.date).getTime() : Date.now(),
+  description: props.formData.description ?? '',
+});
 const customerOptions = ref<any[]>([]);
 const particularOptions = ref<any[]>([]);
+const newParticularName = ref('');
 
-// Internal state for bulk add switch
 const localBulkAddMode = computed({
   get: () => props.bulkAddMode,
   set: (val) => emits('update:bulkAddMode', val),
@@ -149,6 +177,8 @@ const disableFutureDates = (timestamp: number) => {
   return timestamp > Date.now();
 };
 
+const shouldShowCreateParticular = computed(() => !!newParticularName.value && !particularOptions.value.some(p => (p?.name || '').toLowerCase() === newParticularName.value.toLowerCase()));
+
 const fetchOptions = async () => {
   try {
     const [customers, particulars] = await Promise.all([
@@ -171,11 +201,28 @@ const fetchOptions = async () => {
   }
 };
 
+const handleParticularSearch = (query: string) => {
+  if (query && query.trim() !== '') {
+    const existingParticular = particularOptions.value.find(p => (p?.name || '').toLowerCase() === query.toLowerCase());
+    newParticularName.value = existingParticular ? '' : query;
+  } else {
+    newParticularName.value = '';
+  }
+};
+
+const handleParticularValueUpdate = (value: number | null) => {
+    form.particular_id = value;
+    newParticularName.value = '';
+};
+
+const handleCreateParticular = () => {
+    emits('open-entity-modal', 'particular', newParticularName.value);
+};
+
 const submitForm = async () => {
   try {
     await formRef.value?.validate();
 
-    // Corrected formatting to avoid timezone issues
     const selectedDate = new Date(form.date);
     const formattedDate = `${selectedDate.getFullYear()}-${(selectedDate.getMonth() + 1).toString().padStart(2, '0')}-${selectedDate.getDate().toString().padStart(2, '0')}`;
 
@@ -191,7 +238,7 @@ const submitForm = async () => {
     } else {
       const response = await api.post('/api/services', payload);
       message.success(`Service booked! Reference: ${response.data.ref_no}`);
-      emits('record-booked', response.data);
+      emits('record-booked', { ...payload, ...response.data });
     }
   } catch (e) {
     handleApiError(e);
@@ -207,7 +254,6 @@ const handleApiError = (e: any) => {
   }
 };
 
-// Sync form with parent prop changes
 watch(() => props.formData, (newVal) => {
   if (newVal) {
     Object.assign(form, {
@@ -215,15 +261,18 @@ watch(() => props.formData, (newVal) => {
       date: newVal.date ? new Date(newVal.date).getTime() : Date.now()
     });
   }
-});
+}, { deep: true });
 
 onMounted(() => {
   fetchOptions();
+});
+
+defineExpose({
+  fetchOptions,
+  form,
 });
 </script>
 
 <style scoped lang="scss">
 @use '@/styles/theme' as *;
-
-
 </style>

@@ -12,7 +12,7 @@
         :tab="toSentenceCase(entity)"
       >
         <n-tabs
-          v-if="['customer', 'agent', 'partner', 'passenger', 'travel_location', 'particular', 'visa_type'].includes(activeTab)"
+          v-if="['customer', 'agent', 'partner', 'passenger', 'travel_location', 'particular','ticket_type', 'visa_type'].includes(activeTab)"
           v-model:value="subTab"
           size="small"
           type="line"
@@ -116,8 +116,8 @@ import PassengerExport from '@/views/PassengerExport.vue';
 import type { DataTableColumns } from 'naive-ui';
 
 const message = useMessage();
-const entityTypes = ['customer','passenger', 'agent', 'partner', 'travel_location', 'particular', 'visa_type'];
-const activeTab = ref<'customer' | 'passenger' | 'agent' | 'partner' | 'travel_location' | 'visa_type' |'particular'>('customer');
+const entityTypes = ['customer','passenger', 'agent', 'partner', 'travel_location', 'particular', 'ticket_type','visa_type'];
+const activeTab = ref<'customer' | 'passenger' | 'agent' | 'partner' | 'travel_location' |'ticket_type' | 'visa_type' |'particular'>('customer');
 const subTab = ref<'active' | 'inactive'>('active');
 const searchQuery = ref('');
 const data = ref<any[]>([]);
@@ -166,6 +166,7 @@ const toSentenceCase = (s: string) => {
   const customFieldLabels: Record<string, string> = {
     customer_id: 'Customer',
     is_active: 'Active',
+    ticket_type: 'Ticket Type',
     visa_type: 'Visa Type',
     travel_location: 'Travel Location',
   };
@@ -227,13 +228,14 @@ const defaultFieldsByEntity: Record<string, Record<string, any>> = {
   partner: { name: '', contact: '', email: '', wallet_balance: 0, active: true, allow_negative_wallet: false },
   passenger: { name: '', contact: '', passport_number: '', salutation: '', address: '', city: '', state: '', country: '', zip_code: '', fathers_name: '', mothers_name: '', date_of_birth: null, passport_issue_date: null, passport_expiry: null, nationality: '', active: true },
   travel_location: { name: '', active: true },
+  ticket_type: { name: '', active: true },
   visa_type: { name: '', active: true },
   particular: { name: '', active: true }
 };
 
 const filteredData = computed(() => {
   let d = [...data.value];
-  if (['customer', 'agent', 'partner', 'passenger', 'travel_location', 'particular', 'visa_type'].includes(activeTab.value)) {
+  if (['customer', 'agent', 'partner', 'passenger', 'travel_location', 'particular','ticket_type', 'visa_type'].includes(activeTab.value)) {
     d = d.filter(row => row.active === (subTab.value === 'active'));
   }
   if (searchQuery.value) {

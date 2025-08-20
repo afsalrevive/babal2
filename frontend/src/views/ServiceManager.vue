@@ -100,6 +100,8 @@
           @record-booked="handleFormSuccess"
           @record-updated="handleFormSuccess"
           @cancel="modalVisible = false"
+          @open-entity-modal="openEntityModal"
+          ref="bookingFormRef"
         />
       </n-card>
     </n-modal>
@@ -186,6 +188,14 @@
       </template>
     </n-modal>
 
+    <EntityFormModal
+      :show="entityModalVisible"
+      :entity-type="entityToCreate"
+      :form-data="{ name: defaultEntityName }"
+      @update:show="handleEntityModalClose"
+      @entity-created="handleEntityCreated"
+    />
+
     <AttachmentModal
       :show="attachmentModalVisible"
       :parent-type="attachmentParentType"
@@ -197,16 +207,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, h, watch, reactive} from 'vue'
-import { useMessage, NButton, NSpace, NModal, NAlert, NCard, NH2, NH3, NForm, NFormItem, NSelect, NGrid, NGi, NText, NInput, NDatePicker, NInputNumber, NTabs, NTabPane, NDataTable, NIcon } from 'naive-ui'
+import { ref, computed, onMounted, h, watch, reactive, nextTick } from 'vue'
+import { useMessage, NButton, NSpace, NModal, NAlert, NCard, NH2, NH3, NForm, NFormItem, NSelect, NInput, NDatePicker, NInputNumber, NTabs, NTabPane, NDataTable, NIcon } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import api from '@/api'
 import PermissionWrapper from '@/components/PermissionWrapper.vue'
 import { DocumentTextOutline } from '@vicons/ionicons5'
 import AttachmentModal from './AttachmentModal.vue'
 import ServiceBookingForm from './ServiceBookingForm.vue'
+import EntityFormModal from './EntityFormModal.vue'
+import { debounce } from 'lodash'
 
 const message = useMessage()
+const bookingFormRef = ref<any>(null)
 
 // Data
 const activeTab = ref('active')
@@ -235,7 +248,10 @@ const openAttachmentsModal = (type, id) => {
   attachmentModalVisible.value = true
 }
 
-// Date range
+const entityModalVisible = ref(false);
+const entityToCreate = ref('');
+const defaultEntityName = ref('');
+
 const dateRange = ref<[number, number] | null>(null)
 const defaultDateRange = computed(() => {
   const end = Date.now()
@@ -247,7 +263,6 @@ onMounted(() => {
   dateRange.value = defaultDateRange.value
 })
 
-// Payment mode options
 const paymentModeOptions = [
   { label: 'Cash', value: 'cash' },
   { label: 'Online', value: 'online' },
@@ -267,37 +282,6 @@ const cancelData = ref({
   customer_refund_amount: 0,
   customer_refund_mode: 'cash'
 })
-
-// Options
-const customerOptions = ref<any[]>([])
-const particularOptions = ref<any[]>([])
-
-const selectedCustomer = computed(() => {
-  if (!currentService.value.customer_id) return null
-  return customerOptions.value.find(
-    c => c.id === currentService.value.customer_id
-  )
-})
-
-const generatePlaceholder = () => {
-  const year = new Date().getFullYear();
-  const yearServices = services.value.filter(s =>
-    s.ref_no && s.ref_no.startsWith(`${year}/S/`)
-  );
-
-  if (yearServices.length === 0) return `${year}/S/00001`;
-
-  const lastNum = yearServices.reduce((max, service) => {
-    const parts = service.ref_no.split('/');
-    if (parts.length < 3) return max;
-
-    const numPart = parts[2];
-    const num = parseInt(numPart) || 0;
-    return Math.max(max, num);
-  }, 0);
-
-  return `${year}/S/${(lastNum + 1).toString().padStart(5, '0')}`;
-};
 
 const referencePlaceholder = ref('')
 const referenceNumber = computed(() => {
@@ -338,7 +322,6 @@ const filterBySearchAndStatus = computed(() => {
     }
 });
 
-// Computed properties for paginated data
 const filteredActiveServices = computed(() => {
   return filterServicesByDate(filterBySearchAndStatus.value).filter(s => s.status === 'booked');
 });
@@ -364,6 +347,7 @@ const fetchData = async () => {
     const params = {
       start_date: dateRange.value?.[0] ? formatDateForAPI(dateRange.value[0]) : undefined,
       end_date: dateRange.value?.[1] ? formatDateForAPI(dateRange.value[1]) : undefined,
+      status: activeTab.value === 'active' ? 'booked' : 'cancelled' 
     }
 
     const res = await api.get('/api/services', { params })
@@ -375,7 +359,6 @@ const fetchData = async () => {
   }
 }
 
-// Corrected function to format date string without timezone issues
 const formatDateForAPI = (timestamp: number) => {
   const date = new Date(timestamp);
   return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
@@ -386,45 +369,26 @@ const toSentenceCase = (str: string | null | undefined) => {
   return str.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 };
 
-const fetchOptions = async () => {
+const generatePlaceholder = async () => {
   try {
-    loading.value = true;
-
-    const [customers, particulars] = await Promise.all([
-      api.get('/api/manage/customer'),
-      api.get('/api/manage/particular')
-    ]);
-
-    customerOptions.value = customers.data.map((c: any) => ({
-      name: c.name,
-      id: c.id,
-      wallet_balance: c.wallet_balance,
-      credit_used: c.credit_used,
-      credit_limit: c.credit_limit
-    }));
-
-    particularOptions.value = particulars.data.map((p: any) => ({
-      name: p.name,
-      id: p.id
-    }));
-
+    const { data } = await api.get('/api/services?action=next_ref_no');
+    return data.ref_no;
   } catch (e) {
-    handleApiError(e);
-  } finally {
-    loading.value = false;
+    message.error('Failed to generate reference number.');
+    return 'Error...';
   }
 };
 
-const openAddModal = () => {
-  referencePlaceholder.value = generatePlaceholder();
-
+const openAddModal = async () => {
+  referencePlaceholder.value = await generatePlaceholder();
   currentService.value = {
     customer_id: null,
     particular_id: null,
     ref_no: '',
     customer_charge: 0,
     customer_payment_mode: 'cash',
-    date: Date.now()
+    date: Date.now(),
+    description: ''
   };
 
   modalVisible.value = true;
@@ -432,17 +396,27 @@ const openAddModal = () => {
   bulkAddMode.value = false;
 };
 
-const handleFormSuccess = (event: any) => {
+const handleFormSuccess = async (event: any) => {
   if (bulkAddMode.value) {
     message.info('Form cleared for next entry.');
+    
+    // FIX: Create a new object to trigger reactivity
     currentService.value = {
+      // Preserve these fields from the last submission
+      particular_id: event.particular_id,
+      date: new Date(event.date).getTime(),
+      customer_payment_mode: event.customer_payment_mode,
+      
+      // Reset these fields for next entry
       customer_id: null,
-      particular_id: null,
-      ref_no: generatePlaceholder(),
       customer_charge: 0,
-      customer_payment_mode: 'cash',
-      date: Date.now()
+      description: '',
+      ref_no: ''
     };
+
+    nextTick(async () => {
+      referencePlaceholder.value = await generatePlaceholder();
+    });
   } else {
     modalVisible.value = false;
   }
@@ -553,6 +527,30 @@ const handleConfirmCancel = () => {
   confirmCancel()
   showCancelConfirmModal.value = false
 }
+
+const openEntityModal = async (type: string, defaultName: string) => {
+  entityToCreate.value = type;
+  defaultEntityName.value = defaultName;
+  entityModalVisible.value = true;
+};
+
+const handleEntityCreated = async (event: any) => {
+  const { type, data } = event;
+  
+  if (bookingFormRef.value && bookingFormRef.value.form) {
+    if (type === 'particular') {
+      bookingFormRef.value.form.particular_id = data.id;
+    }
+  }
+
+  await bookingFormRef.value?.fetchOptions();
+
+  entityModalVisible.value = false;
+};
+
+const handleEntityModalClose = (val: boolean) => {
+  entityModalVisible.value = val;
+};
 
 // Table columns
 const baseColumns: DataTableColumns<any> = [
@@ -710,7 +708,6 @@ watch([searchQuery, dateRange, activeTab], () => {
 // Lifecycle
 onMounted(async () => {
   await fetchData()
-  await fetchOptions()
 })
 </script>
 

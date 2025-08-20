@@ -4,105 +4,73 @@
       <n-h2>Ticket Manager</n-h2>
     </template>
 
-    <n-tabs v-model:value="activeTab" type="line" animated>
-      <n-tab-pane name="active" tab="Active Tickets">
-        <n-space justify="space-between" wrap class="table-controls">
-          <n-space>
-            <n-input
-              v-model:value="searchQuery"
-              placeholder="Search tickets"
-              clearable
-              style="max-width: 300px;"
-            />
-            <n-date-picker
-              v-model:value="dateRange"
-              type="daterange"
-              clearable
-              :default-value="defaultDateRange"
-              style="max-width: 300px;"
-            />
-            <n-button @click="exportExcel" type="primary" secondary>
-              <template #icon>
-                <n-icon><DocumentTextOutline /></n-icon>
-              </template>
-              Excel
-            </n-button>
-            <n-button @click="exportPDF" type="primary" secondary>
-              <template #icon>
-                <n-icon><DocumentTextOutline /></n-icon>
-              </template>
-              PDF
-            </n-button>
-          </n-space>
-          <PermissionWrapper resource="ticket" operation="write">
-            <n-button type="primary" @click="openAddModal">Book Ticket</n-button>
-          </PermissionWrapper>
-        </n-space>
-
-        <n-data-table
-          :columns="columnsBooked"
-          :data="activeTickets"
-          :loading="loading"
-          :pagination="pagination"
-          striped
-          style="margin-top: 16px;"
-        />
-      </n-tab-pane>
-      <n-tab-pane name="cancelled" tab="Cancelled Tickets">
-        <n-space>
-          <n-input
-            v-model:value="searchQuery"
-            placeholder="Search tickets"
-            clearable
-            style="max-width: 300px;"
-          />
-          <n-date-picker
-            v-model:value="dateRange"
-            type="daterange"
-            clearable
-            :default-value="defaultDateRange"
-            style="max-width: 300px;"
-          />
-          <n-button @click="exportExcel" type="primary" secondary>
-            <template #icon>
-              <n-icon><DocumentTextOutline /></n-icon>
-            </template>
-            Excel
-          </n-button>
-          <n-button @click="exportPDF" type="primary" secondary>
-            <template #icon>
-              <n-icon><DocumentTextOutline /></n-icon>
-            </template>
-            PDF
-          </n-button>
-        </n-space>
-        <n-data-table
-          :columns="columnsCancelled"
-          :data="cancelledTickets"
-          :loading="loading"
-          :pagination="pagination"
-          striped
-          style="margin-top: 16px;"
-        />
-      </n-tab-pane>
+    <n-tabs v-model:value="activeTab" type="line" animated @update:value="onTabChange">
+      <n-tab-pane name="active" tab="Active Tickets" />
+      <n-tab-pane name="cancelled" tab="Cancelled Tickets" />
     </n-tabs>
+
+    <n-space justify="space-between" wrap class="table-controls">
+      <n-space>
+        <n-input
+          v-model:value="searchQuery"
+          placeholder="Search tickets"
+          clearable
+          style="max-width: 300px;"
+        />
+        <n-date-picker
+          v-model:value="dateRange"
+          type="daterange"
+          clearable
+          :default-value="defaultDateRange"
+          style="max-width: 300px;"
+        />
+        <n-button @click="exportExcel" type="primary" secondary>
+          <template #icon>
+            <n-icon><DocumentTextOutline /></n-icon>
+          </template>
+          Excel
+        </n-button>
+        <n-button @click="exportPDF" type="primary" secondary>
+          <template #icon>
+            <n-icon><DocumentTextOutline /></n-icon>
+          </template>
+          PDF
+        </n-button>
+      </n-space>
+      <PermissionWrapper resource="ticket" operation="write">
+        <n-button type="primary" @click="openAddModal">Book Ticket</n-button>
+      </PermissionWrapper>
+    </n-space>
+
+    <n-data-table
+      :columns="activeTab === 'active' ? columnsBooked : columnsCancelled"
+      :data="allTickets"
+      :loading="loading"
+      :pagination="pagination"
+      :remote="true"
+      striped
+      style="margin-top: 16px;"
+      @update:sorter="handleSorterChange"
+      @update:page="handlePageChange"
+      @update:page-size="handlePageSizeChange"
+    />
 
     <n-modal v-model:show="modalVisible" class="full-width-modal">
       <n-card class="modal-card">
         <n-h2 class="modal-title">{{ editMode ? 'Edit Ticket' : 'Book Ticket' }}</n-h2>
         <BookingForm
-            v-show="modalVisible && !entityModalVisible"
-            :edit-mode="editMode"
-            :form-data="currentTicket"
-            :reference-number="referenceNumber"
-            :is-visa-management="false"
-            :bulk-add-mode="bulkAddMode"
-            @update:bulkAddMode="bulkAddMode = $event"
-            @record-booked="handleFormSuccess"
-            @record-updated="handleFormSuccess"
-            @open-entity-modal="openEntityModal"
-            @cancel="modalVisible = false"
-            ref="bookingFormRef"
+          v-show="modalVisible"
+          :edit-mode="editMode"
+          :form-data="currentTicket"
+          :reference-number="referenceNumber"
+          :is-visa-management="false"
+          :bulk-add-mode="bulkAddMode"
+          @update:bulkAddMode="bulkAddMode = $event"
+          @record-booked="handleFormSuccess"
+          @record-updated="handleFormSuccess"
+          @open-entity-modal="openEntityModal"
+          @cancel="modalVisible = false"
+          ref="bookingFormRef"
         />
       </n-card>
     </n-modal>
@@ -147,7 +115,7 @@
         </n-form>
       </n-card>
     </n-modal>
-
+    
     <n-modal v-model:show="editCancelledModalVisible" class="transaction-modal">
       <n-card class="modal-card">
         <n-h2 class="modal-title">Edit Cancelled Ticket #{{ currentTicket.ref_no }}</n-h2>
@@ -227,13 +195,12 @@
       @update:show="attachmentModalVisible = $event"
       @attachment-updated="fetchData"
     />
-
   </n-card>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, h, reactive, watch, toRaw } from 'vue';
-import { useMessage, NButton, NSpace, NForm, NFormItem, NInputNumber, NInput, NSelect, NDatePicker, NModal, NCard, NH2, NH3, NDivider, NAlert, NDataTable, NIcon, NSwitch, NTabs, NTabPane, NSpin } from 'naive-ui';
+import { ref, computed, onMounted, h, reactive, watch, nextTick } from 'vue';
+import { useMessage, NButton, NSpace, NForm, NFormItem, NInputNumber, NInput, NSelect, NDivider, NAlert, NModal, NCard, NH3, NIcon, NH2, NSwitch, NDataTable } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
 import api from '@/api';
 import PermissionWrapper from '@/components/PermissionWrapper.vue';
@@ -241,9 +208,13 @@ import { DocumentTextOutline } from '@vicons/ionicons5';
 import EntityFormModal from './EntityFormModal.vue';
 import AttachmentModal from './AttachmentModal.vue';
 import BookingForm from './BookingForm.vue';
+import { debounce } from 'lodash';
+
+// Correct type definition for SortOrder
+type SortOrder = 'ascend' | 'descend' | false;
 
 const message = useMessage();
-const bookingFormRef = ref<InstanceType<typeof BookingForm> | null>(null);
+const bookingFormRef = ref<any>(null);
 
 const entityModalVisible = ref(false);
 const entityToCreate = ref('');
@@ -274,6 +245,7 @@ const attachmentModalVisible = ref(false);
 const attachmentParentType = ref('');
 const attachmentParentId = ref(null);
 
+const ticketTypeOptions = ref<any[]>([]);
 
 const currentTicket = ref<any>({
   id: null,
@@ -283,8 +255,10 @@ const currentTicket = ref<any>({
   passenger_id: null,
   particular_id: null,
   ref_no: '',
+  ticket_type_id: null, // New field for ticket type
   customer_charge: 0,
   agent_paid: 0,
+  description: '',
   customer_payment_mode: 'cash',
   agent_payment_mode: 'cash',
   date: Date.now(),
@@ -313,43 +287,92 @@ const referenceNumber = computed(() => {
   return referencePlaceholder.value || 'Generating...';
 });
 
-// A single computed property to filter tickets based on all criteria
-const activeTickets = computed(() => {
-    return allTickets.value.filter(t => t.status === 'booked');
-});
-
-const cancelledTickets = computed(() => {
-    return allTickets.value.filter(t => t.status === 'cancelled');
-});
-
-
 const pagination = reactive({
   page: 1,
   pageSize: 20,
   showSizePicker: true,
   pageSizes: [10, 20, 50, 100],
-  onChange: (page: number) => { pagination.page = page; },
-  onUpdatePageSize: (pageSize: number) => { pagination.pageSize = pageSize; pagination.page = 1; },
+  itemCount: 0,
+  onUpdatePage: (page: number) => {
+    pagination.page = page;
+    fetchData();
+  },
+  onUpdatePageSize: (pageSize: number) => {
+    pagination.pageSize = pageSize;
+    pagination.page = 1;
+    fetchData();
+  },
 });
 
+const sortKey = ref<string | null>(null);
+const sortOrder = ref<SortOrder | false>(false);
+
+
+const fetchData = async () => {
+  loading.value = true;
+  try {
+    const params = {
+      status: activeTab.value === 'active' ? 'booked' : 'cancelled',
+      page: pagination.page,
+      per_page: pagination.pageSize,
+      search_query: searchQuery.value,
+      start_date: dateRange.value?.[0] ? formatDateForAPI(dateRange.value[0]) : undefined,
+      end_date: dateRange.value?.[1] ? formatDateForAPI(dateRange.value[1]) : undefined,
+      sort_by: sortKey.value,
+      sort_order: sortOrder.value,
+    };
+    
+    const res = await api.get('/api/tickets', { params });
+    allTickets.value = res.data.data;
+    pagination.itemCount = res.data.total;
+  } catch (e) {
+    message.error('Failed to load tickets');
+  } finally {
+    loading.value = false;
+  }
+};
+
+const handleSorterChange = (sorter: { columnKey: string, order: SortOrder } | null) => {
+  sortKey.value = sorter?.columnKey ?? null;
+  sortOrder.value = sorter?.order ?? false;
+  pagination.page = 1;
+  fetchData();
+};
+
+const handlePageChange = (page: number) => {
+    pagination.page = page;
+    fetchData();
+};
+
+const handlePageSizeChange = (pageSize: number) => {
+    pagination.pageSize = pageSize;
+    pagination.page = 1;
+    fetchData();
+};
+
+const onTabChange = (tabName: string) => {
+  activeTab.value = tabName;
+  pagination.page = 1;
+  fetchData();
+};
+
 const baseColumns: DataTableColumns<any> = [
-  { title: 'Ref No', key: 'ref_no', sorter: (a, b) => a.ref_no.localeCompare(b.ref_no) },
+  { title: 'Ref No', key: 'ref_no', sorter: true, sortOrder: sortKey.value === 'ref_no' ? sortOrder.value : false },
   {
     title: 'Date',
     key: 'date',
     render: (row) => row.date ? new Date(row.date).toLocaleDateString() : 'N/A',
-    sorter: (a, b) => {
-      const dateA = a.date ? new Date(a.date).getTime() : 0
-      const dateB = b.date ? new Date(b.date).getTime() : 0
-      return dateA - dateB
-    }
+    sorter: true,
+    sortOrder: sortKey.value === 'date' ? sortOrder.value : false
   },
-  { title: 'Customer', key: 'customer_name', sorter: (a, b) => a.customer_name.localeCompare(b.customer_name) },
-  { title: 'Passenger', key: 'passenger_name', sorter: (a, b) => a.passenger_name.localeCompare(b.passenger_name)},
-  { title: 'Agent', key: 'agent_name', sorter: (a, b) => (a.agent_name || '').localeCompare(b.agent_name || '') },
-  { title: 'Paid to Agent', key: 'agent_paid', sorter: (a, b) => a.agent_paid - b.agent_paid },
-  { title: 'Customer Charge', key: 'customer_charge', sorter: (a, b) => a.customer_charge - b.customer_charge },
-  { title: 'Profit', key: 'profit', sorter: (a, b) => a.profit - b.profit, render: row => row.profit?.toFixed(2) },
+  { title: 'Customer', key: 'customer_name', sorter: true, sortOrder: sortKey.value === 'customer_name' ? sortOrder.value : false },
+  { title: 'Passenger', key: 'passenger_name', sorter: true, sortOrder: sortKey.value === 'passenger_name' ? sortOrder.value : false },
+  { title: 'Ticket Type', key: 'ticket_type_name', sorter: true, sortOrder: sortKey.value === 'ticket_type_name' ? sortOrder.value : false },
+  { title: 'Agent', key: 'agent_name', sorter: true, sortOrder: sortKey.value === 'agent_name' ? sortOrder.value : false },
+  { title: 'Paid to Agent', key: 'agent_paid', sorter: true, sortOrder: sortKey.value === 'agent_paid' ? sortOrder.value : false },
+  { title: 'Customer Charge', key: 'customer_charge', sorter: true, sortOrder: sortKey.value === 'customer_charge' ? sortOrder.value : false },
+  { title: 'Profit', key: 'profit', sorter: true, sortOrder: sortKey.value === 'profit' ? sortOrder.value : false, render: row => row.profit?.toFixed(2) },
+  { title: 'Description', key: 'description' }
 ];
 
 const columnsBooked = ref<DataTableColumns<any>>([
@@ -380,7 +403,7 @@ const columnsBooked = ref<DataTableColumns<any>>([
         default: () => h(NButton, {
           size: 'small',
           onClick: () => openAttachmentsModal('ticket', row.id),
-        }, { default: () => `Manage` }),
+        }, { default: () => `Manage`}),
       });
     },
   },
@@ -421,27 +444,22 @@ const columnsCancelled = ref<DataTableColumns<any>>([
   },
 ]);
 
-const fetchData = async () => {
-  loading.value = true;
+const fetchTicketTypeOptions = async () => {
   try {
-    const params = {
-      start_date: dateRange.value?.[0] ? formatDateForAPI(dateRange.value[0]) : undefined,
-      end_date: dateRange.value?.[1] ? formatDateForAPI(dateRange.value[1]) : undefined,
-      status: activeTab.value === 'active' ? 'booked' : 'cancelled',
-      search_query: searchQuery.value,
-    };
-    const res = await api.get('/api/tickets', { params });
-    allTickets.value = res.data;
+    const res = await api.get('/api/manage/ticket_type');
+    ticketTypeOptions.value = res.data.map((tt: any) => ({
+      label: tt.name,
+      value: tt.id
+    }));
   } catch (e) {
-    message.error('Failed to load tickets');
-  } finally {
-    loading.value = false;
+    message.error('Failed to load ticket types');
   }
 };
 
+const debouncedFetchData = debounce(fetchData, 500);
+
 const formatDateForAPI = (timestamp: number) => {
   const date = new Date(timestamp);
-  // Ensure the date is treated as a local date to prevent timezone shifts
   return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
 };
 
@@ -455,9 +473,8 @@ const exportExcel = async () => {
       search_query: searchQuery.value,
     };
     
-    // Check for empty data before making the API call
-    if (!dateRange.value || (dateRange.value[0] === dateRange.value[1] && allTickets.value.length === 0)) {
-        message.info('No data available in this date range to export.');
+    if (pagination.itemCount === 0) {
+        message.info('No data available to export.');
         return;
     }
 
@@ -488,9 +505,8 @@ const exportPDF = async () => {
       search_query: searchQuery.value,
     };
     
-    // Check for empty data before making the API call
-    if (!dateRange.value || (dateRange.value[0] === dateRange.value[1] && allTickets.value.length === 0)) {
-        message.info('No data available in this date range to export.');
+    if (pagination.itemCount === 0) {
+        message.info('No data available to export.');
         return;
     }
 
@@ -518,17 +534,14 @@ const openAttachmentsModal = (type: string, id: number) => {
 };
 
 
-const generatePlaceholder = () => {
-  const year = new Date().getFullYear();
-  const yearTickets = (activeTickets.value || []).filter(t => t.ref_no && t.ref_no.startsWith(`${year}/T/`));
-  if (yearTickets.length === 0) return `${year}/T/00001`;
-  const lastNum = yearTickets.reduce((max, ticket) => {
-    const parts = ticket.ref_no.split('/');
-    if (parts.length < 3) return max;
-    const num = parseInt(parts[2]) || 0;
-    return Math.max(max, num);
-  }, 0);
-  return `${year}/T/${(lastNum + 1).toString().padStart(5, '0')}`;
+const generatePlaceholder = async () => {
+  try {
+    const { data } = await api.get('/api/tickets/next_ref_no');
+    return data.ref_no;
+  } catch (e) {
+    message.error('Failed to generate reference number.');
+    return 'Error...';
+  }
 };
 
 const confirmCancelTicket = (row: any) => {
@@ -626,8 +639,8 @@ const handleApiError = (e: any) => {
   }
 };
 
-const openAddModal = () => {
-  referencePlaceholder.value = generatePlaceholder();
+const openAddModal = async () => {
+  referencePlaceholder.value = await generatePlaceholder();
   currentTicket.value = {
     id: null,
     customer_id: null,
@@ -636,8 +649,10 @@ const openAddModal = () => {
     passenger_id: null,
     particular_id: null,
     ref_no: '',
+    ticket_type_id: null,
     customer_charge: 0,
     agent_paid: 0,
+    description: '',
     customer_payment_mode: 'wallet',
     agent_payment_mode: 'wallet',
     date: Date.now(),
@@ -645,12 +660,17 @@ const openAddModal = () => {
   editMode.value = false;
   bulkAddMode.value = false;
   modalVisible.value = true;
+  await nextTick();
+  bookingFormRef.value?.fetchOptions();
 };
 
 const editTicket = (ticket: any) => {
-  currentTicket.value = { ...ticket };
+  currentTicket.value = { ...ticket, date: ticket.date ? new Date(ticket.date).getTime() : null };
   editMode.value = true;
   modalVisible.value = true;
+  nextTick(() => {
+    bookingFormRef.value?.fetchOptions();
+  });
 };
 
 const handleFormSuccess = () => {
@@ -668,16 +688,23 @@ const openEntityModal = async (type: string, defaultName: string) => {
 
 const handleEntityCreated = async (event: any) => {
   const { type, data } = event;
-  if (bookingFormRef.value) {
-    await bookingFormRef.value.fetchOptions();
+  
+  // Directly set the ID and let the child component fetch its own options
+  if (bookingFormRef.value && bookingFormRef.value.currentRecord) {
     if (type === 'passenger') {
       bookingFormRef.value.currentRecord.passenger_id = data.id;
     } else if (type === 'particular') {
       bookingFormRef.value.currentRecord.particular_id = data.id;
     } else if (type === 'travel_location') {
       bookingFormRef.value.currentRecord.travel_location_id = data.id;
+    } else if (type === 'ticket_type') {
+      bookingFormRef.value.currentRecord.ticket_type_id = data.id;
     }
   }
+
+  // Tell the child component to re-fetch its options
+  await bookingFormRef.value?.fetchOptions();
+
   entityModalVisible.value = false;
 };
 
@@ -685,11 +712,19 @@ const handleEntityModalClose = (val: boolean) => {
   entityModalVisible.value = val;
 };
 
-watch([activeTab, searchQuery, dateRange], () => {
+watch([activeTab, dateRange], () => {
+  pagination.page = 1;
   fetchData();
-}, { deep: true, immediate: true });
+}, { deep: true });
+
+watch(searchQuery, () => {
+  pagination.page = 1;
+  debouncedFetchData();
+});
 
 onMounted(async () => {
   dateRange.value = defaultDateRange.value;
+  fetchTicketTypeOptions();
+  fetchData();
 });
 </script>

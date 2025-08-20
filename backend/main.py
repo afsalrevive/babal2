@@ -21,7 +21,7 @@ from applications.service_api import ServiceResource
 from applications.dashboard import CompanyBalancesAPI, DashboardMetricsAPI, CustomerWalletCreditAPI, AgentWalletCreditAPI, PartnerWalletCreditAPI
 from applications.attachment_api import AttachmentResource
 from applications.reports_api import  CompanyBalanceReportResource
-from applications.invoice_api import InvoiceListResource, InvoiceStatusResource, InvoiceDownloadResource
+from applications.invoice_api import InvoiceListResource, InvoiceStatusResource, InvoiceDownloadResource,InvoiceDeleteResource, InvoiceExportResource
 from sqlalchemy import text
 
 def create_app():
@@ -101,6 +101,8 @@ def create_app():
     )
     api.add_resource(TicketResource,    '/api/tickets',endpoint='ticket_operations')
     api.add_resource(VisaResource,    '/api/visas',endpoint='visa_operations')
+    api.add_resource(TicketResource, '/api/tickets/next_ref_no', endpoint='ticket_next_ref_no')
+    api.add_resource(VisaResource, '/api/visas/next_ref_no', endpoint='visa_next_ref_no')
     api.add_resource(ServiceResource, '/api/services')
     api.add_resource(CompanyBalancesAPI, "/api/dashboard/balances")
     api.add_resource(DashboardMetricsAPI, "/api/dashboard/metrics","/api/dashboard/export/pdf")
@@ -115,6 +117,8 @@ def create_app():
     api.add_resource(InvoiceListResource, '/api/invoices')
     api.add_resource(InvoiceStatusResource, '/api/invoices/<int:invoice_id>/status')
     api.add_resource(InvoiceDownloadResource, '/api/invoices/<int:invoice_id>/download')
+    api.add_resource(InvoiceDeleteResource, '/api/invoices/<int:invoice_id>')
+    api.add_resource(InvoiceExportResource, '/api/invoices/export')
 
     # Create tables & seed
     with app.app_context():

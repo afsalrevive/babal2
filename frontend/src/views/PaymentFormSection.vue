@@ -20,15 +20,15 @@
         />
         <n-grid v-if="selectedEntity" :cols="2" x-gap="12" style="margin-top: 8px;">
           <n-gi>
-            <n-text type="info">Wallet: ₹{{ selectedEntity.wallet_balance ?? 'N/A' }}</n-text>
+            <n-text type="info">Wallet: ₹{{ selectedEntity.wallet_balance.toFixed(2) ?? 'N/A' }}</n-text>
           </n-gi>
           <n-gi>
             <n-text type="warning">
               <template v-if="form.entity_type === 'agent'">
-                Credit Balance: ₹{{ selectedEntity.credit_balance ?? 'N/A' }}/₹{{ selectedEntity.credit_limit ?? 'N/A' }}
+                Credit Balance: ₹{{ selectedEntity.credit_balance.toFixed(2) ?? 'N/A' }}/₹{{ selectedEntity.credit_limit.toFixed(2) ?? 'N/A' }}
               </template>
               <template v-else>
-                Credit Used: ₹{{ selectedEntity.credit_used ?? 'N/A' }}/₹{{ selectedEntity.credit_limit ?? 'N/A' }}
+                Credit Used: ₹{{ selectedEntity.credit_used.toFixed(2) ?? 'N/A' }}/₹{{ selectedEntity.credit_limit.toFixed(2) ?? 'N/A' }}
               </template>
             </n-text>
           </n-gi>
@@ -74,7 +74,20 @@
         :loading="particularsLoading" 
         filterable 
         clearable 
+        @search="$emit('particular-search', $event)"
+        @clear="$emit('particular-clear')"
+        @update:value="$emit('particular-value-update', $event)"
       />
+      <n-space v-if="shouldShowCreateParticular" align="center" style="margin-top: 8px;">
+        <n-button 
+          type="primary" 
+          :disabled="!newParticularName" 
+          @click="$emit('create-particular')"
+          @mousedown.prevent
+        >
+          Create
+        </n-button>
+      </n-space>
     </n-form-item>
 </template>
 
@@ -141,10 +154,19 @@ defineProps({
   isEditing: {
     type: Boolean,
     required: true
+  },
+  // NEW PROPS FOR ON-THE-FLY PARTICULAR CREATION
+  newParticularName: {
+    type: String,
+    required: true
+  },
+  shouldShowCreateParticular: {
+    type: Boolean,
+    required: true
   }
 })
 
-defineEmits(['entity-type-change', 'payment-type-change', 'fetch-company-balance','toggle-value-change'])
+defineEmits(['entity-type-change', 'payment-type-change', 'fetch-company-balance', 'toggle-value-change', 'particular-search', 'particular-clear', 'particular-value-update', 'create-particular'])
 </script>
 
 <style scoped lang="scss">

@@ -1,18 +1,20 @@
 <template>
   <n-config-provider :theme="currentTheme" :theme-overrides="themeOverrides">
     <n-message-provider>
-      <component
-        :is="isAuthPage ? currentPageComponent : MainLayout"
-        :is-dark="isDark"
-        @toggle-theme="toggleTheme"
-      />
+      <n-dialog-provider>
+        <component
+          :is="isAuthPage ? currentPageComponent : MainLayout"
+          :is-dark="isDark"
+          @toggle-theme="toggleTheme"
+        />
+      </n-dialog-provider>
     </n-message-provider>
   </n-config-provider>
 </template>
 
 <script setup>
 import { ref, computed } from 'vue';
-import { NConfigProvider, darkTheme } from 'naive-ui';
+import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme } from 'naive-ui';
 import MainLayout from '@/layouts/MainLayout.vue';
 import { useRoute } from 'vue-router'
 import Login from '@/views/Login.vue'

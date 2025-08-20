@@ -4,6 +4,7 @@ from flask import request, abort, g
 from flask_restful import Resource
 from applications.utils import check_permission
 from applications.model import db, Customer, Agent, Visa, Particular, TravelLocation, Passenger, VisaType
+from sqlalchemy import or_, func
 from datetime import datetime, date, timedelta
 from applications.common_booking_resource import CommonBookingResource
 from applications.pdf_excel_export_helpers import generate_export_excel, generate_export_pdf
@@ -11,22 +12,40 @@ from applications.pdf_excel_export_helpers import generate_export_excel, generat
 class VisaResource(Resource, CommonBookingResource):
     def __init__(self, **kwargs):
         super().__init__(model=Visa, ref_prefix="V")
+    
     def round_to_two(self, value):
         return round(float(value), 2) if value is not None else 0.0
+
+    def _get_next_ref_no(self):
+        current_year = datetime.now().year
+        prefix = f"{current_year}/V/"
+        max_ref = db.session.query(db.func.max(self.MODEL.ref_no)).filter(self.MODEL.ref_no.like(f"{prefix}%")).scalar()
+        last_num = int(max_ref.split('/')[-1]) if max_ref else 0
+        return f"{prefix}{last_num + 1:05d}"
     
     @check_permission()
     def get(self):
+        # Handle the next reference number endpoint first
+        if request.path.endswith('/next_ref_no'):
+            return {'ref_no': self._get_next_ref_no()}, 200
+
+        # Original GET logic for fetching visas
         export_format = request.args.get('export')
         status = request.args.get('status')
         start_date_str = request.args.get('start_date')
         end_date_str = request.args.get('end_date')
         search_query = request.args.get('search_query', '')
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        sort_by = request.args.get('sort_by', 'ref_no')
+        sort_order = request.args.get('sort_order', 'desc')
 
         # Eager-load all related models
         query = self.MODEL.query.options(
             db.joinedload(self.MODEL.customer),
             db.joinedload(self.MODEL.agent),
-            db.joinedload(self.MODEL.visa_type)
+            db.joinedload(self.MODEL.visa_type),
+            db.joinedload(self.MODEL.passenger),
         )
 
         # Filter by status if specified
@@ -48,25 +67,58 @@ class VisaResource(Resource, CommonBookingResource):
             query = query.outerjoin(Customer, self.MODEL.customer_id == Customer.id)\
                          .outerjoin(Agent, self.MODEL.agent_id == Agent.id)\
                          .outerjoin(VisaType, self.MODEL.visa_type_id == VisaType.id)\
-                         .filter(db.or_(
-                            db.func.lower(self.MODEL.ref_no).like(search_pattern),
-                            db.func.lower(Customer.name).like(search_pattern),
-                            db.func.lower(Agent.name).like(search_pattern),
-                            db.func.lower(VisaType.name).like(search_pattern)
+                         .outerjoin(Passenger, self.MODEL.passenger_id == Passenger.id)\
+                         .filter(or_(
+                            func.lower(self.MODEL.ref_no).like(search_pattern),
+                            func.lower(Customer.name).like(search_pattern),
+                            func.lower(Agent.name).like(search_pattern),
+                            func.lower(VisaType.name).like(search_pattern),
+                            func.lower(Passenger.name).like(search_pattern),
                          ))
 
-        # Apply default descending sort order
-        visas = query.order_by(self.MODEL.ref_no.desc()).all()
+        # Apply sorting logic
+        if sort_by in ['ref_no', 'date', 'customer_name', 'passenger_name', 'agent_name', 'agent_paid', 'customer_charge', 'profit', 'visa_type_name']:
+            if sort_by in ['customer_name', 'agent_name', 'passenger_name', 'visa_type_name']:
+                # Handle sorting on joined tables
+                sort_model = {
+                    'customer_name': Customer,
+                    'agent_name': Agent,
+                    'passenger_name': Passenger,
+                    'visa_type_name': VisaType,
+                }.get(sort_by)
+                if sort_model:
+                    sort_column = getattr(sort_model, 'name')
+                    if sort_order == 'ascend':
+                        query = query.order_by(sort_column.asc())
+                    else:
+                        query = query.order_by(sort_column.desc())
+            else:
+                sort_column = getattr(self.MODEL, sort_by)
+                if sort_order == 'ascend':
+                    query = query.order_by(sort_column.asc())
+                else:
+                    query = query.order_by(sort_column.desc())
+        else:
+            query = query.order_by(self.MODEL.ref_no.desc())
         
         if export_format in ['excel', 'pdf']:
+            visas = query.all()
             formatted_data = [self._format_for_export(rec) for rec in visas]
             if export_format == 'excel':
                 return generate_export_excel(formatted_data, 'visa')
             if export_format == 'pdf':
                 title = f"{status.capitalize()} Visas"
                 return generate_export_pdf(formatted_data, title, start_date_str, end_date_str, status='visa')
-
-        return [self._format_visa(rec) for rec in visas], 200
+        
+        paginated_result = query.paginate(page=page, per_page=per_page, error_out=False)
+        visas = paginated_result.items
+        
+        return {
+            'data': [self._format_visa(rec) for rec in visas],
+            'total': paginated_result.total,
+            'page': paginated_result.page,
+            'per_page': paginated_result.per_page
+        }, 200
 
     @check_permission()
     def post(self, action=None):
@@ -82,7 +134,6 @@ class VisaResource(Resource, CommonBookingResource):
         record_id = data.get('id')
         if not record_id:
             abort(400, "Missing visa ID")
-        # Pass 'visa' as the ref_type
         return self.update_record(self.MODEL, record_id, 'visa')
 
     @check_permission()
@@ -90,10 +141,8 @@ class VisaResource(Resource, CommonBookingResource):
         record_id = request.args.get('id')
         if not record_id:
             abort(400, "Missing visa ID")
-        # Pass 'visa' as the ref_type
         return self.delete_record(self.MODEL, record_id, 'visa')
 
-    # The following helper methods are specific to visas and should be kept
     def book_record(self):
         data = request.json
         required_fields = ['customer_id', 'travel_location_id', 'visa_type_id', 'customer_charge', 'customer_payment_mode']
@@ -112,18 +161,18 @@ class VisaResource(Resource, CommonBookingResource):
                 travel_location_id=data['travel_location_id'],
                 passenger_id=data.get('passenger_id'),
                 visa_type_id=data['visa_type_id'],
-                ref_no=data.get('ref_no') or self._generate_reference_number(),
+                ref_no=data.get('ref_no') or self._get_next_ref_no(),
                 status='booked',
                 customer_charge = self.round_to_two(data['customer_charge']),
                 agent_paid=agent_paid,
-                # Correctly calculate and round profit
                 profit=round(customer_charge - agent_paid, 2),
                 customer_payment_mode=data['customer_payment_mode'].lower().strip(),
                 agent_payment_mode=data.get('agent_payment_mode', 'wallet').lower().strip(),
                 updated_by=getattr(g, 'username', 'system'),
                 created_at=datetime.now(),
                 date=visa_date,
-                particular_id=data.get('particular_id')
+                particular_id=data.get('particular_id'),
+                description=data.get('description')
             )
             db.session.add(visa)
             db.session.flush()
@@ -140,7 +189,7 @@ class VisaResource(Resource, CommonBookingResource):
             'id': visa.id,
             'ref_no': visa.ref_no,
             'visa_type_id': visa.visa_type_id,
-            'visa_type': visa.visa_type.name if visa.visa_type else None,
+            'visa_type_name': visa.visa_type.name if visa.visa_type else None,
             'customer_id': visa.customer_id,
             'customer_name': visa.customer.name if visa.customer else None,
             'agent_id': visa.agent_id,
@@ -154,6 +203,7 @@ class VisaResource(Resource, CommonBookingResource):
             'profit': visa.profit,
             'status': visa.status,
             'date': visa.date.isoformat() if visa.date else None,
+            'description': visa.description,
             'customer_payment_mode': visa.customer_payment_mode,
             'agent_payment_mode': visa.agent_payment_mode,
             'customer_refund_amount': visa.customer_refund_amount,
@@ -169,11 +219,11 @@ class VisaResource(Resource, CommonBookingResource):
         data = {
             'Reference No': visa.ref_no,
             'Date': visa.date.strftime('%Y-%m-%d') if visa.date else '',
-            'Customer': Customer.query.get(visa.customer_id).name if visa.customer_id else '',
-            'Agent': Agent.query.get(visa.agent_id).name if visa.agent_id else '',
-            'Particular': Particular.query.get(visa.particular_id).name if visa.particular_id else '',
-            'Travel Location': TravelLocation.query.get(visa.travel_location_id).name if visa.travel_location_id else '',
-            'Passenger': Passenger.query.get(visa.passenger_id).name if visa.passenger_id else '',
+            'Customer': visa.customer.name if visa.customer else '',
+            'Agent': visa.agent.name if visa.agent else '',
+            'Particular': visa.particular.name if visa.particular else '',
+            'Travel Location': visa.travel_location.name if visa.travel_location else '',
+            'Passenger': visa.passenger.name if visa.passenger else '',
             'Visa Type': visa.visa_type.name if visa.visa_type else '',
             'Customer Charge': visa.customer_charge,
             'Agent Paid': visa.agent_paid,
@@ -181,6 +231,7 @@ class VisaResource(Resource, CommonBookingResource):
             'Status': visa.status.capitalize(),
             'Customer Payment Mode': visa.customer_payment_mode.capitalize(),
             'Agent Payment Mode': visa.agent_payment_mode.capitalize() if visa.agent_payment_mode else '',
+            'Description': visa.description if visa.description else '',
         }
         
         if visa.status == 'cancelled':
@@ -206,10 +257,3 @@ class VisaResource(Resource, CommonBookingResource):
             except ValueError:
                 abort(400, "Invalid date format. Use YYYY-MM-DD.")
         return date.today()
-
-    def _generate_reference_number(self):
-        current_year = datetime.now().year
-        prefix = f"{current_year}/V/"
-        max_ref = db.session.query(db.func.max(self.MODEL.ref_no)).filter(self.MODEL.ref_no.like(f"{prefix}%")).scalar()
-        last_num = int(max_ref.split('/')[-1]) if max_ref else 0
-        return f"{prefix}{last_num + 1:05d}"

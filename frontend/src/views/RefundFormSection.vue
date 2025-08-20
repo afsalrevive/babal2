@@ -122,7 +122,7 @@
           />
           <n-grid v-if="selectedFromEntity" :cols="2" x-gap="12" style="margin-top: 8px;">
             <n-gi>
-              <n-text type="info">Wallet: ₹{{ selectedFromEntity.wallet_balance ?? 'N/A' }}</n-text>
+              <n-text type="info">Wallet: ₹{{ selectedFromEntity.wallet_balance.toFixed(2) ?? 'N/A' }}</n-text>
             </n-gi>
             <n-gi>
               <n-text type="warning">
@@ -130,7 +130,7 @@
                   Credit: ₹{{ selectedFromEntity.credit_balance ?? 'N/A' }}
                 </template>
                 <template v-else>
-                  Credit: ₹{{ selectedFromEntity.credit_used ?? 'N/A' }}/₹{{ selectedFromEntity.credit_limit ?? 'N/A' }}
+                  Credit: ₹{{ selectedFromEntity.credit_used.toFixed(2) ?? 'N/A' }}/₹{{ selectedFromEntity.credit_limit.toFixed(2) ?? 'N/A' }}
                 </template>
               </n-text>
             </n-gi>
@@ -174,12 +174,28 @@
         :loading="particularsLoading" 
         filterable 
         clearable 
+        @search="$emit('particular-search', $event)"
+        @clear="$emit('particular-clear')"
+        @update:value="$emit('particular-value-update', $event)"
       />
+      <n-space v-if="shouldShowCreateParticular" align="center" style="margin-top: 8px;">
+        <n-button 
+          type="primary" 
+          :disabled="!newParticularName" 
+          @click="$emit('create-particular')"
+          @mousedown.prevent
+        >
+          Create
+        </n-button>
+      </n-space>
     </n-form-item>
 </template>
 
 <script setup lang="ts">
 import type { PropType } from 'vue'
+import {
+    NFormItem, NSelect, NSpace, NGrid, NGi, NText, NSwitch, NP, NAlert, NButton
+} from 'naive-ui'
 
 const props = defineProps({
   form: {
@@ -245,6 +261,15 @@ const props = defineProps({
   isEditing: {
     type: Boolean,
     required: true
+  },
+  // NEW PROPS FOR ON-THE-FLY PARTICULAR CREATION
+  newParticularName: {
+    type: String,
+    required: true
+  },
+  shouldShowCreateParticular: {
+    type: Boolean,
+    required: true
   }
 })
 
@@ -256,7 +281,7 @@ const getEntityToCompanyFromModeOptions = (entityType: string) => {
   return [{ label: 'Cash', value: 'cash' }, { label: 'Online', value: 'online' }]
 }
 
-defineEmits(['refund-entity-change'])
+defineEmits(['refund-entity-change', 'particular-search', 'particular-clear', 'particular-value-update', 'create-particular'])
 </script>
 
 <style scoped lang="scss">

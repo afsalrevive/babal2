@@ -27,7 +27,7 @@
               placeholder="Select Date Range"
               @update:value="loadInvoices"
               clearable
-              style="min-width: 250px;"
+              class="date-picker"
             />
             
             <n-input
@@ -35,11 +35,19 @@
               placeholder="Search by Invoice #, Entity, or Date"
               @input="handleSearchInput"
               clearable
-              style="min-width: 250px;"
+              class="search-input"
             />
           </n-space>
           
-          <n-button type="primary" @click="openGenerateModal">Generate Invoice</n-button>
+          <PermissionWrapper resource="invoice" operation="write">
+            <n-button 
+              type="primary" 
+              @click="openGenerateModal" 
+              class="compact-button"
+            >
+              Generate Invoice/Report
+            </n-button>
+          </PermissionWrapper>
         </n-space>
       </n-gi>
     </n-grid>
@@ -48,34 +56,25 @@
       :columns="columns" 
       :data="filteredInvoices" 
       :pagination="pagination" 
-      style="margin-top: 16px;" 
+      class="data-table" 
     />
 
     <n-modal 
       v-model:show="showGenerateModal"
-      preset="card"
-      :style="{
-        width: '600px',
-        maxHeight: '80vh',
-        overflow: 'auto'
-      }"
-      title="Generate Invoice"
+      class="full-width-modal transaction-modal"
+      title="Generate Invoice or Report"
       :bordered="false"
-      size="huge"
     >
-      <n-card
-        :style="{
-          padding: '20px',
-          height: '400px',
-          display: 'flex',
-          'flex-direction': 'column',
-          'justify-content': 'space-between'
-        }"
-      >
+      <n-card class="modal-card">
         <n-space vertical :size="24">
-          <n-h2 style="margin: 0">Generate Invoice</n-h2>
+          <n-h2 class="modal-title">
+            Generate Invoice or Report for 
+            <span class="highlight-text">{{ activeEntityType.charAt(0).toUpperCase() + activeEntityType.slice(1) }}</span>
+              &nbsp;
+            <span class="highlight-text">{{ selectedEntityName }}</span>
+          </n-h2>
           
-          <n-space vertical :size="16">
+          <n-space vertical :size="16" class="responsive-form-grid">
             <n-select
               v-if="!entitiesLoading"
               v-model:value="selectedEntityId"
@@ -83,6 +82,7 @@
               placeholder="Select Entity"
               filterable
               size="large"
+              class="entity-select"
             />
             <n-spin :show="entitiesLoading" size="large" v-if="entitiesLoading" />
             
@@ -91,23 +91,53 @@
               type="daterange"
               placeholder="Select Period"
               size="large"
-              style="width: 100%"
+              class="period-picker"
             />
           </n-space>
         </n-space>
         
         <template #footer>
-          <n-space justify="end">
-            <n-button size="large" @click="showGenerateModal = false">Cancel</n-button>
-            <n-button
-              size="large"
-              type="primary"
-              :disabled="!selectedEntityId || !periodRange"
-              :loading="generatingInvoice"
-              @click="generateInvoice"
-            >
-              Generate
-            </n-button>
+          <n-space justify="end" class="table-controls">
+            <n-button size="large" @click="showGenerateModal = false" class="cancel-btn compact-button">Cancel</n-button>
+
+            <PermissionWrapper resource="invoice" operation="write">
+              <n-button
+                size="large"
+                type="info"
+                :disabled="!selectedEntityId || !periodRange"
+                :loading="exportingReport"
+                @click="exportReport('pdf')"
+                class="export-btn compact-button"
+              >
+                Export PDF
+              </n-button>
+            </PermissionWrapper>
+
+            <PermissionWrapper resource="invoice" operation="write">
+              <n-button
+                size="large"
+                type="info"
+                :disabled="!selectedEntityId || !periodRange"
+                :loading="exportingReport"
+                @click="exportReport('excel')"
+                class="export-btn compact-button"
+              >
+                Export Excel
+              </n-button>
+            </PermissionWrapper>
+
+            <PermissionWrapper resource="invoice" operation="modify">
+              <n-button
+                size="large"
+                type="primary"
+                :disabled="!selectedEntityId || !periodRange"
+                :loading="generatingInvoice"
+                @click="confirmGenerateInvoice"
+                class="generate-btn compact-button"
+              >
+                Generate Invoice
+              </n-button>
+            </PermissionWrapper>
           </n-space>
         </template>
       </n-card>
@@ -119,11 +149,18 @@
 import { ref, onMounted, h, watch, computed } from 'vue';
 import { 
   NButton, NCard, NTabs, NTabPane, NSpace, NSelect, NDatePicker, 
-  NInput, NDataTable, NModal, NH2, NSpin, NTag, useMessage, NGrid, NGi 
+  NInput, NDataTable, NModal, NH2, NSpin, NTag, useMessage, NGrid, NGi, useDialog
 } from 'naive-ui';
 import api from '@/api';
+import PermissionWrapper from '@/components/PermissionWrapper.vue';
+import { hasPermission } from '@/utils/permissions';
+import { useAuthStore } from '@/stores/auth';
 
 const message = useMessage();
+const dialog = useDialog();
+const authStore = useAuthStore();
+const userPermissions = computed(() => authStore.user?.perms || []);
+
 const activeEntityType = ref('agent');
 const selectedStatus = ref('all');
 const dateRange = ref(null);
@@ -136,27 +173,29 @@ const selectedEntityId = ref(null);
 const periodRange = ref(null);
 const entityOptions = ref([]);
 const generatingInvoice = ref(false);
+const exportingReport = ref(false);
 const entitiesLoading = ref(false);
 
-// Get default date range (current month start to today)
+const selectedEntityName = computed(() => {
+  const selected = entityOptions.value.find(o => o.value === selectedEntityId.value);
+  return selected ? selected.label : '';
+});
+
 function getDefaultDateRange() {
   const today = new Date();
   const firstDayOfMonth = new Date(today);
   firstDayOfMonth.setDate(1);
   firstDayOfMonth.setHours(0, 0, 0, 0);
   
-  // Ensure today is at end of day
   const todayEnd = new Date(today);
   todayEnd.setHours(23, 59, 59, 999);
   
   return [firstDayOfMonth.getTime(), todayEnd.getTime()];
 }
 
-// Initialize date ranges
 dateRange.value = getDefaultDateRange();
 periodRange.value = getDefaultDateRange();
 
-// Format date for display
 function formatDateForDisplay(dateStr) {
   if (!dateStr) return '';
   const date = new Date(dateStr);
@@ -167,7 +206,6 @@ function formatDateForDisplay(dateStr) {
   });
 }
 
-// Table columns with fixed slots
 const columns = [
   { 
     title: 'Invoice #', 
@@ -214,36 +252,61 @@ const columns = [
     title: 'Actions',
     key: 'actions',
     render(row) {
-      return [
-        h(NButton, { 
-          size: 'small', 
-          type: 'primary',
-          onClick: () => downloadInvoice(row.id, row.invoice_number)
-        }, 
-        { default: () => 'Download' }
-        ),
-        
-        h(NButton, {
-          size: 'small',
-          type: row.status === 'pending' ? 'success' : 'error',
-          style: 'margin-left: 8px;',
-          onClick: () => updateInvoiceStatus(row.id, row.status === 'pending' ? 'paid' : 'cancelled')
-        }, 
-        { default: () => row.status === 'pending' ? 'Mark Paid' : 'Cancel' }
-        )
-      ];
+      const buttons = [];
+
+      // Download button visible for 'read' and above
+      if (hasPermission(userPermissions.value, 'invoice', 'read')) {
+        buttons.push(
+          h(NButton, { 
+            size: 'small', 
+            type: 'primary',
+            class: 'compact-button',
+            onClick: () => downloadInvoice(row.id, row.invoice_number)
+          }, 
+          { default: () => 'Download' }
+          )
+        );
+      }
+      
+      // Mark Paid/Cancel button visible for 'full' access
+      if (hasPermission(userPermissions.value, 'invoice', 'full')) {
+        buttons.push(
+          h(NButton, {
+            size: 'small',
+            type: row.status === 'pending' ? 'success' : 'error',
+            class: 'action-btn compact-button',
+            onClick: () => confirmStatusUpdate(row.id, row.status)
+          }, 
+          { default: () => row.status === 'pending' ? 'Mark Paid' : 'Cancel' }
+          )
+        );
+      }
+
+      // Delete button visible for 'full' access
+      if (hasPermission(userPermissions.value, 'invoice', 'full')) {
+        buttons.push(
+          h(NButton, {
+            size: 'small',
+            type: 'error',
+            class: 'action-btn compact-button',
+            onClick: () => deleteInvoice(row.id, row.invoice_number)
+          }, 
+          { default: () => 'Delete' }
+          )
+        );
+      }
+
+      return buttons;
     }
   }
 ];
 
-// Handle search input with debounce
 let searchTimeout = null;
 function handleSearchInput() {
   clearTimeout(searchTimeout);
   searchTimeout = setTimeout(filterInvoices, 300);
 }
 
-// Filter invoices based on search query
 function filterInvoices() {
   if (!searchQuery.value) {
     filteredInvoices.value = [...invoices.value];
@@ -263,7 +326,6 @@ function filterInvoices() {
   });
 }
 
-// Load invoices
 async function loadInvoices() {
   try {
     const response = await api.get('/api/invoices', {
@@ -283,9 +345,9 @@ async function loadInvoices() {
   }
 }
 
-// Load entity list for dropdown
 async function loadEntities() {
   entitiesLoading.value = true;
+  selectedEntityId.value = null;
   entityOptions.value = [];
   try {
     const res = await api.get(`/api/manage/${activeEntityType.value}`);
@@ -318,16 +380,32 @@ function openGenerateModal() {
   showGenerateModal.value = true;
 }
 
-// Generate invoice
-async function generateInvoice() {
+function confirmGenerateInvoice() {
   if (!selectedEntityId.value || !periodRange.value || periodRange.value.length !== 2) {
     message.error('Please select an entity and a valid date range');
     return;
   }
+
+  const selectedEntity = entityOptions.value.find(o => o.value === selectedEntityId.value);
+  const entityName = selectedEntity ? selectedEntity.label : 'Unknown Entity';
   
+  const formattedPeriodStart = formatDateForDisplay(new Date(periodRange.value[0]));
+  const formattedPeriodEnd = formatDateForDisplay(new Date(periodRange.value[1]));
+
+  dialog.warning({
+    title: 'Confirm Invoice Generation',
+    content: `Do you want to continue to generate an invoice for ${entityName} for the period from ${formattedPeriodStart} to ${formattedPeriodEnd}?`,
+    positiveText: 'Generate Invoice',
+    negativeText: 'Cancel',
+    onPositiveClick: () => {
+      generateInvoice();
+    }
+  });
+}
+
+async function generateInvoice() {
   generatingInvoice.value = true;
   try {
-    // Convert timestamps to date strings
     const formatDate = (ts) => {
       const date = new Date(ts);
       const year = date.getFullYear();
@@ -343,9 +421,9 @@ async function generateInvoice() {
       period_end: formatDate(periodRange.value[1])
     };
     
-    const response = await api.post('/api/invoices', payload);
+    await api.post('/api/invoices', payload);
     
-    message.success('Invoice generated successfully');
+    message.success('Invoice generated and saved successfully');
     showGenerateModal.value = false;
     loadInvoices();
   } catch (err) {
@@ -353,7 +431,6 @@ async function generateInvoice() {
     
     let errorMsg = 'Unknown error occurred';
     if (err.response) {
-      // Handle different error response formats
       if (typeof err.response.data === 'string') {
         errorMsg = err.response.data;
       } else if (err.response.data?.message) {
@@ -368,7 +445,6 @@ async function generateInvoice() {
             const json = JSON.parse(text);
             errorMsg = json.message || json.error || text;
           } catch {
-            // Not JSON, use as-is
           }
         } catch (blobErr) {
           errorMsg = 'Failed to parse error response';
@@ -381,14 +457,81 @@ async function generateInvoice() {
     } else {
       errorMsg = err.message || 'Unknown error occurred';
     }
-    
-    message.error(`Failed to generate invoice: ${errorMsg}`);
+
+    dialog.error({
+      title: 'Failed to Generate Invoice',
+      content: errorMsg,
+      positiveText: 'OK',
+    });
   } finally {
     generatingInvoice.value = false;
   }
 }
 
-// Download invoice
+async function exportReport(exportType) {
+  if (!selectedEntityId.value || !periodRange.value || periodRange.value.length !== 2) {
+    message.error('Please select an entity and a valid date range');
+    return;
+  }
+  
+  exportingReport.value = true;
+  try {
+    const formatDate = (ts) => {
+      const date = new Date(ts);
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    const payload = {
+      entity_type: activeEntityType.value,
+      entity_id: selectedEntityId.value,
+      period_start: formatDate(periodRange.value[0]),
+      period_end: formatDate(periodRange.value[1]),
+      export_type: exportType
+    };
+    
+    const res = await api.post('/api/invoices/export', payload, { responseType: 'blob' });
+    
+    const mimeTypeMap = {
+      'pdf': 'application/pdf',
+      'excel': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    };
+    
+    const blob = new Blob([res.data], { type: mimeTypeMap[exportType] });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const extension = exportType === 'pdf' ? '.pdf' : '.xlsx';
+    a.download = `report_${activeEntityType.value}_${payload.period_start}_to_${payload.period_end}${extension}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+    
+    message.success(`${exportType.toUpperCase()} report exported successfully`);
+  } catch (err) {
+    console.error('Error exporting report:', err);
+    let errorMsg = 'Failed to export report';
+    if (err.response) {
+      if (err.response.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          errorMsg = text;
+        } catch {
+          errorMsg = 'Invalid file content';
+        }
+      } else {
+        errorMsg = err.response.data?.message || err.response.data?.error || 'Server error';
+      }
+    }
+    message.error(`${errorMsg}`);
+  } finally {
+    exportingReport.value = false;
+  }
+}
+
 async function downloadInvoice(id, invoiceNumber) {
   try {
     const res = await api.get(`/api/invoices/${id}/download`, { responseType: 'blob' });
@@ -423,7 +566,22 @@ async function downloadInvoice(id, invoiceNumber) {
   }
 }
 
-// Update invoice status
+function confirmStatusUpdate(id, currentStatus) {
+  const newStatus = currentStatus === 'pending' ? 'paid' : 'cancelled';
+  const actionText = newStatus === 'paid' ? 'mark as Paid' : 'cancel';
+  const confirmationContent = `Are you sure you want to ${actionText} this invoice?`;
+
+  dialog.warning({
+    title: 'Confirm Status Change',
+    content: confirmationContent,
+    positiveText: 'Confirm',
+    negativeText: 'Cancel',
+    onPositiveClick: () => {
+      updateInvoiceStatus(id, newStatus);
+    }
+  });
+}
+
 async function updateInvoiceStatus(id, status) {
   try {
     await api.patch(`/api/invoices/${id}/status`, { status });
@@ -441,7 +599,29 @@ async function updateInvoiceStatus(id, status) {
   }
 }
 
-// Watch for changes
+function deleteInvoice(id, invoiceNumber) {
+  dialog.warning({
+    title: 'Confirm Deletion',
+    content: `Are you sure you want to delete invoice "${invoiceNumber}"? This action cannot be undone.`,
+    positiveText: 'Delete',
+    negativeText: 'Cancel',
+    onPositiveClick: async () => {
+      try {
+        await api.delete(`/api/invoices/${id}`);
+        message.success('Invoice deleted successfully');
+        loadInvoices();
+      } catch (err) {
+        console.error('Error deleting invoice:', err);
+        let errorMsg = 'Failed to delete invoice';
+        if (err.response) {
+          errorMsg = err.response.data?.message || err.response.data?.error || 'Server error';
+        }
+        message.error(`${errorMsg}`);
+      }
+    }
+  });
+}
+
 watch(activeEntityType, () => {
   loadInvoices();
 });
@@ -452,37 +632,113 @@ watch(showGenerateModal, (newValue) => {
   }
 });
 
-// Initialize
 onMounted(() => {
   loadInvoices();
 });
 </script>
 
-<style scoped>
-.n-space--wrap {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+<style scoped lang="scss">
+@use '@/styles/theme' as *;
+
+// Use existing global styles for modal
+.full-width-modal {
+  @extend .full-width-modal;
 }
 
+.transaction-modal {
+  @extend .transaction-modal;
+}
+
+.modal-card {
+  @extend .modal-card;
+}
+
+// Use existing global styles for buttons
+.compact-button {
+  @extend .compact-button;
+  min-width: 180px; // increase as needed
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+// Use existing global styles for table controls
+.table-controls {
+  @extend .table-controls;
+}
+
+// Use existing global styles for responsive form grid
+.responsive-form-grid {
+  @extend .responsive-form-grid;
+}
+
+// Additional component-specific styles
+.date-picker,
+.search-input {
+  min-width: 250px;
+}
+
+.data-table {
+  margin-top: 16px;
+  
+  :deep(.n-data-table-th) {
+    background-color: var(--card-bg);
+    font-weight: 600;
+  }
+}
+
+.action-btn {
+  margin-left: 8px;
+}
+
+// Modal title style
+.modal-title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+// Differentiating the "Generate Invoice" button
+.generate-btn {
+  background-color: #00ba38; // A distinct color
+  border-color: #00ba63;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+
+  &:hover {
+    background-color: #007bb5;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+  }
+
+  &.n-button--disabled {
+    background-color: #ccc !important;
+    border-color: #ccc !important;
+    box-shadow: none;
+    cursor: not-allowed;
+  }
+}
+
+// Style for highlighted text in the modal title
+.highlight-text {
+  color: #a4af3f; // A distinct blue color
+  font-weight: 800;
+  font-family: 'Georgia', serif;
+}
+
+// Responsive adjustments
 @media (max-width: 768px) {
+  .date-picker,
+  .search-input {
+    min-width: 100%;
+    margin-bottom: 12px;
+  }
+  
   .n-space--wrap {
     flex-direction: column;
-    align-items: stretch !important;
-  }
-  
-  .n-space--wrap > * {
-    margin-bottom: 12px;
-    width: 100%;
-  }
-  
-  .n-date-picker, .n-input {
-    width: 100% !important;
-    min-width: unset !important;
-  }
-  
-  .n-tabs {
-    width: 100%;
+    align-items: stretch;
   }
 }
 </style>

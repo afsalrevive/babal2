@@ -24,7 +24,7 @@
         />
         <n-grid v-if="selectedFromEntity" :cols="1" style="margin-top: 8px;">
           <n-gi>
-            <n-text type="info">Balance: ₹{{ selectedFromEntity.wallet_balance ?? 'N/A' }}</n-text>
+            <n-text type="info">Balance: ₹{{ selectedFromEntity.wallet_balance.toFixed(2) ?? 'N/A' }}</n-text>
           </n-gi>
         </n-grid>
       </n-space>
@@ -55,7 +55,7 @@
         />
         <n-grid v-if="selectedToEntity" :cols="1" style="margin-top: 8px;">
           <n-gi>
-            <n-text type="info">Balance: ₹{{ selectedToEntity.wallet_balance ?? 'N/A' }}</n-text>
+            <n-text type="info">Balance: ₹{{ selectedToEntity.wallet_balance.toFixed(2) ?? 'N/A' }}</n-text>
           </n-gi>
         </n-grid>
       </n-space>
@@ -68,12 +68,28 @@
         :loading="particularsLoading" 
         filterable 
         clearable 
+        @search="$emit('particular-search', $event)"
+        @clear="$emit('particular-clear')"
+        @update:value="$emit('particular-value-update', $event)"
       />
+      <n-space v-if="shouldShowCreateParticular" align="center" style="margin-top: 8px;">
+        <n-button 
+          type="primary" 
+          :disabled="!newParticularName" 
+          @click="$emit('create-particular')"
+          @mousedown.prevent
+        >
+          Create
+        </n-button>
+      </n-space>
     </n-form-item>
 </template>
 
 <script setup lang="ts">
 import type { PropType } from 'vue'
+import {
+    NFormItem, NSelect, NSpace, NGrid, NGi, NText, NButton
+} from 'naive-ui'
 
 defineProps({
   form: {
@@ -119,10 +135,19 @@ defineProps({
   isEditing: {
     type: Boolean,
     required: true
+  },
+  // NEW PROPS FOR ON-THE-FLY PARTICULAR CREATION
+  newParticularName: {
+    type: String,
+    required: true
+  },
+  shouldShowCreateParticular: {
+    type: Boolean,
+    required: true
   }
 })
 
-defineEmits(['refund-entity-change'])
+defineEmits(['refund-entity-change', 'particular-search', 'particular-clear', 'particular-value-update', 'create-particular'])
 </script>
 
 <style scoped lang="scss">

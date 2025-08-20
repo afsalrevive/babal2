@@ -92,9 +92,11 @@ class CommonBookingResource:
             'travel_location_id': data.get('travel_location_id', record.travel_location_id),
             'customer_id': data.get('customer_id', record.customer_id),
             'agent_id': data.get('agent_id', record.agent_id),
+            'ticket_type_id': data.get('ticket_type_id', record.ticket_type_id) if hasattr(record, 'ticket_type_id') else None,
             'visa_type_id': data.get('visa_type_id', record.visa_type_id) if hasattr(record, 'visa_type_id') else None,
             'passenger_id': data.get('passenger_id', record.passenger_id),
             'particular_id': data.get('particular_id', record.particular_id),
+            'description': data.get('description', record.description),
             'customer_charge': float(data.get('customer_charge', record.customer_charge)),
             'agent_paid': float(data.get('agent_paid', record.agent_paid)),
             'customer_payment_mode': data.get('customer_payment_mode', record.customer_payment_mode),
@@ -103,7 +105,8 @@ class CommonBookingResource:
             'updated_by': updated_by,
             'updated_at': datetime.now()
         }
-        
+        if hasattr(record,'ticker_type_id'):
+            updates['ticket_type_id'] = data.get('ticket_type_id', getattr(record, 'ticket_type_id'))
         if hasattr(record, 'visa_type_id'):
             updates['visa_type_id'] = data.get('visa_type_id', getattr(record, 'visa_type_id'))
         

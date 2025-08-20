@@ -305,6 +305,24 @@ class VisaType(db.Model):
     )
     def __repr__(self):
         return f"<VisaType {self.name}>"
+    
+class TicketType(db.Model):
+    __tablename__ = 'ticket_type'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), unique=True, nullable=False)
+    active = db.Column(db.Boolean, default=True)
+    tickets = db.relationship('Ticket', backref='ticket_type', lazy=True)
+
+    attachments = db.relationship(
+        'Attachment',
+        primaryjoin="and_(Attachment.parent_type=='ticket_type', foreign(TicketType.id)==Attachment.parent_id)",
+        backref='ticket_type',
+        lazy=True,
+        single_parent=True,
+        viewonly=True
+    )
+    def __repr__(self):
+        return f"<TicketType {self.name}>"
 
 class Ticket(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -316,7 +334,9 @@ class Ticket(db.Model):
     travel_location_id = db.Column(db.Integer, db.ForeignKey('travel_location.id'), nullable=True)
     passenger_id = db.Column(db.Integer, db.ForeignKey('passenger.id'), nullable=True)
     particular_id = db.Column(db.Integer, db.ForeignKey('particular.id'), nullable=True)
+    description = db.Column(db.String(255))
 
+    ticket_type_id = db.Column(db.Integer, db.ForeignKey('ticket_type.id'), nullable=True)
     # Ticket status & refund
     status = db.Column(db.String(20), default='booked')
     date = db.Column(db.Date, default=date.today)
@@ -361,6 +381,7 @@ class Visa(db.Model):
     travel_location_id = db.Column(db.Integer, db.ForeignKey('travel_location.id'), nullable=True)
     passenger_id = db.Column(db.Integer, db.ForeignKey('passenger.id'), nullable=True)
     particular_id = db.Column(db.Integer, db.ForeignKey('particular.id'), nullable=True)
+    description = db.Column(db.String(255))
 
     # Visa-specific foreign key
     visa_type_id = db.Column(db.Integer, db.ForeignKey('visa_type.id'), nullable=True)
@@ -454,6 +475,7 @@ class Service(db.Model):
     date = db.Column(db.Date, default=date.today)
     ref_no = db.Column(db.String(100), nullable=False)
     status = db.Column(db.String(20), default='booked')
+    description = db.Column(db.String(255))
     
     customer_charge = db.Column(db.Float, nullable=False, default=0.0)
     customer_payment_mode = db.Column(db.String(20), nullable=True)

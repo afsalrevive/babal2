@@ -6,6 +6,15 @@ from flask import send_file, request
 import pandas as pd
 import re
 
+def _is_date_format(s, format_regex=r'^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})?$'):
+    """
+    Helper function to check if a string matches a date format.
+    Default format is YYYY-MM-DD or YYYY-MM-DD HH:MM:SS.
+    """
+    if isinstance(s, str):
+        return re.match(format_regex, s) is not None
+    return False
+
 def generate_export_pdf(data, title, date_range_start, date_range_end, summary_totals=None, exclude_columns=None, status=None):
     """
     A reusable function to generate a PDF export with dynamic headers, data, and summary.
@@ -104,6 +113,12 @@ def generate_export_pdf(data, title, date_range_start, date_range_end, summary_t
                 # Re-render headers on new page
                 y_start_new_page = pdf.get_y()
                 x_pos_new_page = pdf.l_margin
+
+                # Re-set the header styling for the new page
+                pdf.set_fill_color(70, 130, 180)
+                pdf.set_text_color(255, 255, 255)
+                pdf.set_font('Arial', 'B', 9)
+
                 for i, header in enumerate(headers):
                     pdf.set_xy(x_pos_new_page, y_start_new_page)
                     pdf.cell(col_width, max_header_height, '', border=1, fill=True)
@@ -114,6 +129,9 @@ def generate_export_pdf(data, title, date_range_start, date_range_end, summary_t
                     pdf.multi_cell(col_width, 5, header, border=0, align='C')
                     x_pos_new_page += col_width
                 pdf.set_y(y_start_new_page + max_header_height)
+                pdf.set_fill_color(255, 255, 255)
+                pdf.set_text_color(0, 0, 0)
+                pdf.set_font('', '', 9)
                 
             y_start_of_row = pdf.get_y()
             x_pos = pdf.l_margin
@@ -174,7 +192,14 @@ def generate_export_excel(data, status, transaction_type=None):
             data = [{'Message': 'No data available in this range.'}]
 
         df = pd.DataFrame(data)
-        
+
+        # Identify and convert date-like columns
+        if not df.empty:
+            for col in df.columns:
+                # Check if the column contains date-like strings and is not all NaNs
+                if df[col].astype(str).apply(_is_date_format).all() and not df[col].isnull().all():
+                    df[col] = pd.to_datetime(df[col])
+
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             sheet_name = transaction_type or status
@@ -182,28 +207,41 @@ def generate_export_excel(data, status, transaction_type=None):
             if len(sheet_name) > 31:
                 sheet_name = sheet_name[:31]
             
-            df.to_excel(writer, sheet_name=sheet_name, index=False, float_format="%.2f")
+            df.to_excel(writer, sheet_name=sheet_name, index=False) # Removed float_format to allow for date formatting
             
             workbook = writer.book
             worksheet = writer.sheets[sheet_name]
-            
-            header_format = workbook.add_format({
-                'bold': True, 
-                'border': 1,
-                'bg_color': '#4472C4',
-                'font_color': 'white'
-            })
-            
-            for col_num, value in enumerate(df.columns.values):
-                worksheet.write(0, col_num, value, header_format)
-            
-            for idx, col in enumerate(df.columns):
+
+            # Add a date format for date columns
+            date_format = workbook.add_format({'num_format': 'yyyy-mm-dd'})
+
+            for col_num, col in enumerate(df.columns.values):
+                # Write headers
+                header_format = workbook.add_format({
+                    'bold': True, 
+                    'border': 1,
+                    'bg_color': '#4472C4',
+                    'font_color': 'white'
+                })
+                worksheet.write(0, col_num, col, header_format)
+
+                # Set column width and apply date format
                 max_len = max(
                     df[col].astype(str).map(len).max(),
                     len(col)
                 ) + 2
-                worksheet.set_column(idx, idx, max_len)
-        
+                worksheet.set_column(col_num, col_num, max_len)
+
+                # Check if column is datetime and apply date format
+                if pd.api.types.is_datetime64_any_dtype(df[col]):
+                    for row_num, value in enumerate(df[col]):
+                        if pd.notna(value):
+                            worksheet.write_datetime(row_num + 1, col_num, value, date_format)
+                else:
+                    # Write regular data
+                    for row_num, value in enumerate(df[col]):
+                        worksheet.write(row_num + 1, col_num, value)
+
         output.seek(0)
         
         file_prefix = transaction_type if transaction_type else status
@@ -216,4 +254,5 @@ def generate_export_excel(data, status, transaction_type=None):
             download_name=download_name
         )
     except Exception as e:
+        print(f"Excel generation failed: {e}")
         return {'error': f'Excel export failed: {str(e)}'}, 500

@@ -6,6 +6,7 @@ from applications.model import db, Customer, Agent, Partner, Transaction ,Passen
 from datetime import datetime, timedelta
 from dateutil.parser import parse as parse_date
 from applications.pdf_excel_export_helpers import generate_export_pdf, generate_export_excel
+from sqlalchemy import case
 
 TRANSACTION_TYPES = ['payment', 'receipt', 'refund', 'wallet_transfer']
 
@@ -88,41 +89,44 @@ def get_transaction_payload(t: Transaction):
         "particular_name": get_particular_name(t.particular_id),
         "ticket_id": getattr(t, 'ticket_id', None)
     }
-    
+
     if t.extra_data:
         payload.update({
             k: v for k, v in t.extra_data.items()
             if v is not None
         })
-        
+
         if t.transaction_type == 'refund' and 'refund_direction' in t.extra_data:
             payload['refund_direction'] = t.extra_data['refund_direction'].lower()
         if 'from_entity_name' in t.extra_data:
             payload['from_entity_name'] = t.extra_data['from_entity_name']
         if 'to_entity_name' in t.extra_data:
             payload['to_entity_name'] = t.extra_data['to_entity_name']
-    
+
     return payload
 
 def generate_ref_no(transaction_type):
-    """Generate unique reference number for transaction"""
-    year = datetime.now().year
-    prefix = REF_NO_PREFIXES.get(transaction_type, 'T')
-    
-    last_trans = Transaction.query.filter(
-        Transaction.ref_no.like(f"{year}/{prefix}/%")
-    ).order_by(Transaction.ref_no.desc()).first()
-    
-    if last_trans:
-        try:
-            last_seq = int(last_trans.ref_no.split('/')[-1])
-        except (ValueError, IndexError):
-            last_seq = 0
-        seq = last_seq + 1
-    else:
-        seq = 1
+    """Generate unique reference number for transaction atomically"""
+    with db.session.begin_nested():  # Use nested transaction for atomicity
+        year = datetime.now().year
+        prefix = REF_NO_PREFIXES.get(transaction_type, 'T')
+        
+        # Get the last sequence within a locked transaction
+        last_trans = db.session.query(
+            Transaction.ref_no
+        ).filter(
+            Transaction.ref_no.like(f"{year}/{prefix}/%")
+        ).with_for_update().order_by(Transaction.ref_no.desc()).first()
 
-    return f"{year}/{prefix}/{seq:05d}"
+        last_seq = 0
+        if last_trans:
+            try:
+                last_seq = int(last_trans.ref_no.split('/')[-1])
+            except (ValueError, IndexError):
+                pass
+
+        seq = last_seq + 1
+        return f"{year}/{prefix}/{seq:05d}"
 def apply_credit_wallet_logic(entity, amount, entity_type, mode='deduct'):
     """Apply wallet/credit logic based on entity type"""
     if entity_type == 'customer':
@@ -138,7 +142,7 @@ def apply_credit_wallet_logic(entity, amount, entity_type, mode='deduct'):
             repay_credit = min(entity.credit_used, amount)
             entity.credit_used -= repay_credit
             entity.wallet_balance += (amount - repay_credit)
-            
+
     elif entity_type == 'agent':
         if mode == 'deduct':
             if entity.wallet_balance + entity.credit_balance < amount:
@@ -151,7 +155,7 @@ def apply_credit_wallet_logic(entity, amount, entity_type, mode='deduct'):
             repay_credit = min(credit_deficit, amount)
             entity.credit_balance += repay_credit
             entity.wallet_balance += (amount - repay_credit)
-            
+
     elif entity_type == 'partner':
         if mode == 'deduct':
             if not entity.allow_negative_wallet and entity.wallet_balance < amount:
@@ -260,19 +264,19 @@ def update_wallet_and_company(transaction):
                 apply_credit_wallet_logic(entity, amount, entity_type='customer', mode='revert')
                 transaction.extra_data["credited_entity"] = True
             log_company(transaction.mode, direction='in')
-            
+
         elif etype == 'partner':
             if pay_type == 'cash_deposit' or (pay_type == 'other_receipt' and extra.get('credit_to_account')):
                 entity.wallet_balance += amount
                 transaction.extra_data["credited_entity"] = True
             log_company(transaction.mode, direction='in')
-            
+
         elif etype == 'agent':
             if pay_type == 'other_receipt' and extra.get('deduct_from_account'):
                 apply_credit_wallet_logic(entity, amount, entity_type='agent', mode='deduct')
                 transaction.extra_data["debited_entity"] = True
             log_company(transaction.mode, direction='in')
-            
+
         elif etype == 'others':
             log_company(transaction.mode, direction='in')
 
@@ -292,10 +296,10 @@ def update_wallet_and_company(transaction):
 
         if direction == 'incoming':
             entity = get_entity(f_type, f_id) if f_type != 'others' else None
-            
+
             if f_type == 'others' or f_mode in ['cash', 'online']:
                 log_company(t_mode, direction='in')
-                
+
                 if f_type != 'others' and credit_to_account:
                     if f_type in ['customer', 'partner']:
                         apply_credit_wallet_logic(entity, amount, entity_type=f_type, mode='revert')
@@ -303,7 +307,7 @@ def update_wallet_and_company(transaction):
                     elif f_type == 'agent':
                         apply_credit_wallet_logic(entity, amount, entity_type='agent', mode='revert')
                         transaction.extra_data["credited_entity"] = True
-            
+
             elif f_mode == 'wallet':
                 if f_type in ['customer', 'partner']:
                     apply_credit_wallet_logic(entity, amount, entity_type=f_type, mode='deduct')
@@ -317,10 +321,10 @@ def update_wallet_and_company(transaction):
 
         elif direction == 'outgoing':
             entity = get_entity(t_type, t_id) if t_type != 'others' else None
-            
+
             if f_mode != 'service_availed':
                 log_company(f_mode, direction='out')
-            
+
             if t_type in ['customer', 'partner']:
                 if deduct_from_account:
                     apply_credit_wallet_logic(entity, amount, entity_type=t_type, mode='deduct')
@@ -328,11 +332,11 @@ def update_wallet_and_company(transaction):
                 elif credit_to_account:
                     apply_credit_wallet_logic(entity, amount, entity_type=t_type, mode='revert')
                     transaction.extra_data["credited_entity"] = True
-            
+
             elif t_type == 'agent' and credit_to_account:
                 apply_credit_wallet_logic(entity, amount, entity_type='agent', mode='revert')
                 transaction.extra_data["credited_entity"] = True
-            
+
             if entity:
                 db.session.add(entity)
 
@@ -370,7 +374,7 @@ def revert_wallet_and_company(transaction):
                     apply_credit_wallet_logic(entity, amount, entity_type='agent', mode='revert')
                 elif etype == 'partner':
                     apply_credit_wallet_logic(entity, amount, entity_type='partner', mode='revert')
-            
+
             if extra.get("credited_entity"):
                 if etype == 'customer':
                     apply_credit_wallet_logic(entity, amount, entity_type='customer', mode='deduct')
@@ -378,9 +382,9 @@ def revert_wallet_and_company(transaction):
                     apply_credit_wallet_logic(entity, amount, entity_type='agent', mode='deduct')
                 elif etype == 'partner':
                     apply_credit_wallet_logic(entity, amount, entity_type='partner', mode='deduct')
-            
+
             db.session.add(entity)
-        
+
         # Check the company_adjusted flag to prevent duplicate entries
         if extra.get("company_adjusted"):
             direction = 'out' if ttype == 'payment' else 'in'
@@ -389,7 +393,7 @@ def revert_wallet_and_company(transaction):
     elif ttype == 'wallet_transfer':
         from_entity = get_entity(extra.get('from_entity_type'), extra.get('from_entity_id'))
         to_entity = get_entity(extra.get('to_entity_type'), extra.get('to_entity_id'))
-        
+
         if to_entity:
             apply_credit_wallet_logic(to_entity, amount, extra.get('to_entity_type'), mode='deduct')
             db.session.add(to_entity)
@@ -397,7 +401,7 @@ def revert_wallet_and_company(transaction):
             apply_credit_wallet_logic(from_entity, amount, extra.get('from_entity_type'), mode='revert')
             db.session.add(from_entity)
         return
-    
+
     elif ttype == 'refund':
         direction = extra.get('refund_direction')
         f_type = extra.get('from_entity_type')
@@ -438,40 +442,107 @@ class TransactionResource(Resource):
     def get(self, transaction_type):
         if transaction_type not in TRANSACTION_TYPES:
             return {'error': 'Invalid transaction type'}, 400
-        
+
         if request.args.get('mode') == 'form':
             return {'ref_no': generate_ref_no(transaction_type)}, 200
-        
+
         export_format = request.args.get('export')
         if export_format in ['excel', 'pdf']:
             return self._export_transactions(transaction_type, export_format)
-        
-        # New logic to return all records for client-side pagination
-        query = Transaction.query.filter_by(transaction_type=transaction_type).order_by(Transaction.date.desc())
-        transactions = query.all()
 
-        return {"transactions": [get_transaction_payload(t) for t in transactions]}, 200
+        # New: Server-side pagination and sorting parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        sort_by = request.args.get('sort_by', 'date')
+        sort_order = request.args.get('sort_order', 'desc')
+        search_query = request.args.get('search_query', '')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+
+        # Base query
+        query = Transaction.query.filter_by(transaction_type=transaction_type)
+
+        # Apply date filter
+        if start_date and end_date:
+            try:
+                start = datetime.strptime(start_date, '%Y-%m-%d').date()
+                end = datetime.strptime(end_date, '%Y-%m-%d').date() + timedelta(days=1)
+                query = query.filter(Transaction.date >= start, Transaction.date < end)
+            except ValueError:
+                return {'error': 'Invalid date format. Use YYYY-MM-DD.'}, 400
+
+        # Apply search filter
+        if search_query:
+            search_pattern = f'%{search_query.lower()}%'
+            query = query.outerjoin(Customer, (Transaction.entity_type == 'customer') & (Transaction.entity_id == Customer.id))\
+                         .outerjoin(Agent, (Transaction.entity_type == 'agent') & (Transaction.entity_id == Agent.id))\
+                         .outerjoin(Partner, (Transaction.entity_type == 'partner') & (Transaction.entity_id == Partner.id))\
+                         .outerjoin(Particular, Transaction.particular_id == Particular.id)\
+                         .filter(db.or_(
+                            db.func.lower(Transaction.ref_no).like(search_pattern),
+                            db.func.lower(Customer.name).like(search_pattern),
+                            db.func.lower(Agent.name).like(search_pattern),
+                            db.func.lower(Partner.name).like(search_pattern),
+                            db.func.lower(Particular.name).like(search_pattern)
+                         ))
+
+        # Apply sorting
+        allowed_sort_columns = ['ref_no', 'date', 'entity_name', 'amount']
+        if sort_by not in allowed_sort_columns:
+            sort_by = 'date'
+
+        if sort_by == 'entity_name':
+            # Special handling for entity name sorting
+            entity_name_expr = case(
+                [
+                    (Transaction.entity_type == 'customer', Customer.name),
+                    (Transaction.entity_type == 'agent', Agent.name),
+                    (Transaction.entity_type == 'partner', Partner.name)
+                ],
+                else_=None
+            )
+            if sort_order == 'asc':
+                query = query.order_by(entity_name_expr.asc())
+            else:
+                query = query.order_by(entity_name_expr.desc())
+        else:
+            column = getattr(Transaction, sort_by)
+            if sort_order == 'asc':
+                query = query.order_by(column.asc())
+            else:
+                query = query.order_by(column.desc())
+
+        # Apply pagination
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+        transactions = pagination.items
+
+        return {
+            "transactions": [get_transaction_payload(t) for t in transactions],
+            "total": pagination.total,
+            "page": page,
+            "per_page": per_page
+        }, 200
 
     @check_permission()
     def post(self, transaction_type):
         if transaction_type not in TRANSACTION_TYPES:
             return {'error': 'Invalid transaction type'}, 400
-        
+
         data = request.json
-        
+
         try:
             amount = data.get('amount')
             if not amount or float(amount) <= 0:
                 return {'error': 'Amount must be greater than 0'}, 400
-            
+
             if transaction_type == 'wallet_transfer':
                 return self.execute_wallet_transfer(data)
-            
+
             if transaction_type == 'refund':
                 direction = data.get('refund_direction')
                 if not direction:
                     return {'error': 'Refund direction is required'}, 400
-                
+
                 data['entity_type'] = data.get(
                     'from_entity_type' if direction == 'incoming' else 'to_entity_type'
                 )
@@ -479,13 +550,14 @@ class TransactionResource(Resource):
                     'from_entity_id' if direction == 'incoming' else 'to_entity_id'
                 )
                 data['mode'] = data.get(
-                    'mode_for_to' if direction == 'incoming' and data['entity_type'] == 'others' 
+                    'mode_for_to' if direction == 'incoming' and data['entity_type'] == 'others'
                     else 'mode_for_from'
                 )
-            
+
             if data.get('entity_type') != 'others' and not data.get('entity_id'):
                 return {'error': f"Entity ID is required for {data.get('entity_type')}"}, 400
-            
+
+            # CRITICAL CHANGE: Generate ref_no here, on submission
             t = Transaction(
                 ref_no=generate_ref_no(transaction_type),
                 entity_type=data.get('entity_type'),
@@ -499,7 +571,7 @@ class TransactionResource(Resource):
                 particular_id=data.get('particular_id'),
                 updated_by=getattr(g, 'username', 'system')
             )
-            
+
             t.extra_data = {
                 k: (None if v == '' else v) for k, v in {
                     'refund_direction': data.get('refund_direction'),
@@ -513,17 +585,17 @@ class TransactionResource(Resource):
                     'mode_for_to': data.get('mode_for_to'),
                 }.items()
             }
-            
+
             update_wallet_and_company(t)
-            
+
             db.session.add(t)
             db.session.commit()
-            
+
             return {
                 'message': f'{transaction_type.capitalize()} created successfully',
                 'transaction': get_transaction_payload(t)
             }, 201
-        
+
         except Exception as e:
             db.session.rollback()
             return {'error': str(e)}, 400
@@ -539,7 +611,7 @@ class TransactionResource(Resource):
         try:
             old_amount = t.amount
             new_amount = float(data.get('amount', old_amount))
-            
+
             amount_changed = new_amount != old_amount
             date_changed = parse_transaction_date(data.get('transaction_date')) != t.date
 
@@ -562,7 +634,7 @@ class TransactionResource(Resource):
 
             # Apply the new logic
             update_wallet_and_company(t)
-            
+
             db.session.commit()
             return {'message': 'Transaction updated'}, 200
 
@@ -588,14 +660,14 @@ class TransactionResource(Resource):
         except Exception as e:
             db.session.rollback()
             return {'error': str(e)}, 400
-            
+
     def _export_transactions(self, transaction_type, format_type):
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
         search_query = request.args.get('search_query', '')
-        
+
         query = Transaction.query.filter_by(transaction_type=transaction_type)
-        
+
         if start_date and end_date:
             try:
                 start = datetime.strptime(start_date, '%Y-%m-%d').date()
@@ -603,7 +675,7 @@ class TransactionResource(Resource):
                 query = query.filter(Transaction.date >= start, Transaction.date < end)
             except ValueError:
                 return {'error': 'Invalid date format. Use YYYY-MM-DD.'}, 400
-        
+
         if search_query:
             search_pattern = f'%{search_query.lower()}%'
             query = query.outerjoin(Customer, (Transaction.entity_type == 'customer') & (Transaction.entity_id == Customer.id))\
@@ -619,7 +691,7 @@ class TransactionResource(Resource):
                          ))
 
         transactions = query.all()
-        
+
         # This is the crucial part: format the data and call the correct export function
         formatted_data = [self._format_transaction_for_export(t) for t in transactions]
 
@@ -627,7 +699,7 @@ class TransactionResource(Resource):
             return self.export_excel(data=formatted_data, transaction_type=transaction_type)
         elif format_type == 'pdf':
             return self.export_pdf(data=formatted_data, transaction_type=transaction_type)
-        
+
         # Fallback in case of an invalid export format, though it should be caught earlier
         return {'error': 'Invalid export format'}, 400
     def execute_wallet_transfer(self, data):
@@ -654,11 +726,11 @@ class TransactionResource(Resource):
                 'to_entity_id': data['to_entity_id']
             }
         )
-        
+
         process_wallet_transfer(t)
         db.session.add(t)
         db.session.commit()
-        
+
         return {
             'message': 'Wallet transfer successful',
             'transaction': get_transaction_payload(t)
@@ -669,24 +741,24 @@ class TransactionResource(Resource):
             "Reference No": transaction.ref_no,
             "Date": transaction.date.strftime('%Y-%m-%d') if transaction.date else '',
         }
-        
+
         if transaction.transaction_type == 'refund':
             direction = transaction.extra_data.get('refund_direction', '')
             base_data["Refund Direction"] = direction.capitalize()
-        
+
         if transaction.transaction_type != 'wallet_transfer':
             base_data.update({
                 "Entity Type": transaction.entity_type.capitalize() if transaction.entity_type else '',
                 "Entity Name": get_entity_name(transaction.entity_type, transaction.entity_id),
             })
-        
+
         if transaction.transaction_type == 'wallet_transfer':
             base_data.update({
                 "From Entity": transaction.extra_data.get('from_entity_name', ''),
                 "To Entity": transaction.extra_data.get('to_entity_name', ''),
                 "Transfer Direction": f"{transaction.extra_data.get('from_entity_type', '').capitalize()} -> {transaction.extra_data.get('to_entity_type', '').capitalize()}"
             })
-        
+
         base_data.update({
             "Particular": get_particular_name(transaction.particular_id),
             "Payment Type": transaction.pay_type.replace('_', ' ').title() if transaction.pay_type else '',
@@ -694,7 +766,7 @@ class TransactionResource(Resource):
             "Amount": transaction.amount,
             "Description": transaction.description,
         })
-        
+
         return base_data
 
     def export_excel(self, data, transaction_type):
@@ -704,7 +776,7 @@ class TransactionResource(Resource):
         title = f"{transaction_type.replace('_', ' ').title()} Transactions"
         total_amount = sum(row.get('Amount', 0) for row in data)
         summary_totals = {"Total Transactions": len(data), "Total Amount": total_amount}
-        
+
         return generate_export_pdf(
             data=data,
             title=title,

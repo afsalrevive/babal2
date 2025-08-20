@@ -4,88 +4,56 @@
       <n-h2>Visa Management</n-h2>
     </template>
 
-    <n-tabs v-model:value="activeTab" type="line" animated>
-      <n-tab-pane name="active" tab="Active Visas">
-        <n-space justify="space-between" wrap class="table-controls">
-          <n-space>
-            <n-input
-              v-model:value="searchQuery"
-              placeholder="Search visas"
-              clearable
-              style="max-width: 300px;"
-            />
-            <n-date-picker
-              v-model:value="dateRange"
-              type="daterange"
-              clearable
-              :default-value="defaultDateRange"
-              style="max-width: 300px;"
-            />
-            <n-button @click="exportExcel" type="primary" secondary>
-              <template #icon>
-                <n-icon><DocumentTextOutline /></n-icon>
-              </template>
-              Excel
-            </n-button>
-            <n-button @click="exportPDF" type="primary" secondary>
-              <template #icon>
-                <n-icon><DocumentTextOutline /></n-icon>
-              </template>
-              PDF
-            </n-button>
-          </n-space>
-          <PermissionWrapper resource="visa" operation="write">
-            <n-button type="primary" @click="openAddModal">Book Visa</n-button>
-          </PermissionWrapper>
-        </n-space>
-
-        <n-data-table
-          :columns="columnsBooked"
-          :data="filteredActiveVisas"
-          :loading="loading"
-          :pagination="pagination"
-          striped
-          style="margin-top: 16px;"
-        />
-      </n-tab-pane>
-      <n-tab-pane name="cancelled" tab="Cancelled Visas">
-        <n-space>
-          <n-input
-            v-model:value="searchQuery"
-            placeholder="Search visas"
-            clearable
-            style="max-width: 300px;"
-          />
-          <n-date-picker
-            v-model:value="dateRange"
-            type="daterange"
-            clearable
-            :default-value="defaultDateRange"
-            style="max-width: 300px;"
-          />
-          <n-button @click="exportExcel" type="primary" secondary>
-            <template #icon>
-              <n-icon><DocumentTextOutline /></n-icon>
-            </template>
-            Excel
-          </n-button>
-          <n-button @click="exportPDF" type="primary" secondary>
-            <template #icon>
-              <n-icon><DocumentTextOutline /></n-icon>
-            </template>
-            PDF
-          </n-button>
-        </n-space>
-        <n-data-table
-          :columns="columnsCancelled"
-          :data="filteredCancelledVisas"
-          :loading="loading"
-          :pagination="pagination"
-          striped
-          style="margin-top: 16px;"
-        />
-      </n-tab-pane>
+    <n-tabs v-model:value="activeTab" type="line" animated @update:value="onTabChange">
+      <n-tab-pane name="active" tab="Active Visas" />
+      <n-tab-pane name="cancelled" tab="Cancelled Visas" />
     </n-tabs>
+
+    <n-space justify="space-between" wrap class="table-controls">
+      <n-space>
+        <n-input
+          v-model:value="searchQuery"
+          placeholder="Search visas"
+          clearable
+          style="max-width: 300px;"
+        />
+        <n-date-picker
+          v-model:value="dateRange"
+          type="daterange"
+          clearable
+          :default-value="defaultDateRange"
+          style="max-width: 300px;"
+        />
+        <n-button @click="exportExcel" type="primary" secondary>
+          <template #icon>
+            <n-icon><DocumentTextOutline /></n-icon>
+          </template>
+          Excel
+        </n-button>
+        <n-button @click="exportPDF" type="primary" secondary>
+          <template #icon>
+            <n-icon><DocumentTextOutline /></n-icon>
+          </template>
+          PDF
+        </n-button>
+      </n-space>
+      <PermissionWrapper resource="visa" operation="write">
+        <n-button type="primary" @click="openAddModal">Book Visa</n-button>
+      </PermissionWrapper>
+    </n-space>
+
+    <n-data-table
+      :columns="activeTab === 'active' ? columnsBooked : columnsCancelled"
+      :data="allVisas"
+      :loading="loading"
+      :pagination="pagination"
+      :remote="true"
+      striped
+      style="margin-top: 16px;"
+      @update:sorter="handleSorterChange"
+      @update:page="handlePageChange"
+      @update:page-size="handlePageSizeChange"
+    />
 
     <n-modal v-model:show="modalVisible" class="full-width-modal">
       <n-card class="modal-card">
@@ -231,8 +199,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, h, reactive, watch } from 'vue';
-import { useMessage, NButton, NSpace, NForm, NFormItem, NInputNumber, NInput, NSelect, NGrid, NGi, NText, NDatePicker, NAlert, NModal, NCard, NH3, NIcon, NH2, NSwitch } from 'naive-ui';
+import { ref, computed, onMounted, h, reactive, watch, nextTick } from 'vue';
+import { useMessage, NButton, NSpace, NForm, NFormItem, NInputNumber, NInput, NSelect, NDivider, NAlert, NModal, NCard, NH3, NIcon, NH2, NSwitch, NDataTable } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
 import api from '@/api';
 import PermissionWrapper from '@/components/PermissionWrapper.vue';
@@ -240,6 +208,10 @@ import { DocumentTextOutline } from '@vicons/ionicons5';
 import EntityFormModal from './EntityFormModal.vue';
 import AttachmentModal from './AttachmentModal.vue';
 import BookingForm from './BookingForm.vue';
+import { debounce } from 'lodash';
+
+// Correct type definition for SortOrder
+type SortOrder = 'ascend' | 'descend' | false;
 
 const message = useMessage();
 const bookingFormRef = ref<any>(null);
@@ -273,6 +245,7 @@ const attachmentModalVisible = ref(false);
 const attachmentParentType = ref('');
 const attachmentParentId = ref(null);
 
+const visaTypeOptions = ref<any[]>([]);
 
 const currentVisa = ref<any>({
   id: null,
@@ -285,6 +258,7 @@ const currentVisa = ref<any>({
   visa_type_id: null,
   customer_charge: 0,
   agent_paid: 0,
+  description: '',
   customer_payment_mode: 'cash',
   agent_payment_mode: 'cash',
   date: Date.now(),
@@ -313,67 +287,94 @@ const referenceNumber = computed(() => {
   return referencePlaceholder.value || 'Generating...';
 });
 
-const filterVisasByDate = (visasList: any[]) => {
-  if (!dateRange.value) return visasList;
-  const [startTimestamp, endTimestamp] = dateRange.value;
-  const startDate = new Date(startTimestamp);
-  const endDate = new Date(endTimestamp);
-  endDate.setHours(23, 59, 59, 999);
-  return visasList.filter(visa => {
-    if (!visa.date) return false;
-    const visaDate = new Date(visa.date);
-    return visaDate >= startDate && visaDate <= endDate;
-  });
-};
-
-// New computed property for filtering based on search query
-const filteredBySearch = computed(() => {
-  const search = searchQuery.value.toLowerCase();
-  return allVisas.value.filter(v => 
-    v.ref_no?.toLowerCase().includes(search) ||
-    (v.agent_name && v.agent_name.toLowerCase().includes(search)) || 
-    (v.customer_name?.toLowerCase().includes(search))
-  );
-});
-
-// Computed properties for active and cancelled visas, now filtered by date range and search
-const filteredActiveVisas = computed(() => {
-    return filteredBySearch.value.filter(v => v.status === 'booked');
-});
-
-const filteredCancelledVisas = computed(() => {
-    return filteredBySearch.value.filter(v => v.status === 'cancelled');
-});
-
-
-// Pagination is now a simple reactive object for client-side pagination
+// Server-side pagination and sorting state
 const pagination = reactive({
   page: 1,
   pageSize: 20,
   showSizePicker: true,
   pageSizes: [10, 20, 50, 100],
-  onChange: (page: number) => { pagination.page = page; },
-  onUpdatePageSize: (pageSize: number) => { pagination.pageSize = pageSize; pagination.page = 1; },
+  itemCount: 0,
+  onUpdatePage: (page: number) => {
+    pagination.page = page;
+    fetchData();
+  },
+  onUpdatePageSize: (pageSize: number) => {
+    pagination.pageSize = pageSize;
+    pagination.page = 1;
+    fetchData();
+  },
 });
 
+const sortKey = ref<string | null>(null);
+const sortOrder = ref<SortOrder | false>(false);
+
+
+// Moved fetchData before its usage
+const fetchData = async () => {
+  loading.value = true;
+  try {
+    const params = {
+      status: activeTab.value === 'active' ? 'booked' : 'cancelled',
+      page: pagination.page,
+      per_page: pagination.pageSize,
+      search_query: searchQuery.value,
+      start_date: dateRange.value?.[0] ? formatDateForAPI(dateRange.value[0]) : undefined,
+      end_date: dateRange.value?.[1] ? formatDateForAPI(dateRange.value[1]) : undefined,
+      sort_by: sortKey.value,
+      sort_order: sortOrder.value,
+    };
+    
+    const res = await api.get('/api/visas', { params });
+    allVisas.value = res.data.data;
+    pagination.itemCount = res.data.total;
+  } catch (e) {
+    message.error('Failed to load visas');
+  } finally {
+    loading.value = false;
+  }
+};
+
+const handleSorterChange = (sorter: { columnKey: string, order: SortOrder } | null) => {
+  sortKey.value = sorter?.columnKey ?? null;
+  sortOrder.value = sorter?.order ?? false;
+  pagination.page = 1;
+  fetchData();
+};
+
+const handlePageChange = (page: number) => {
+    pagination.page = page;
+    fetchData();
+};
+
+const handlePageSizeChange = (pageSize: number) => {
+    pagination.pageSize = pageSize;
+    pagination.page = 1;
+    fetchData();
+};
+
+const onTabChange = (tabName: string) => {
+  activeTab.value = tabName;
+  pagination.page = 1;
+  fetchData();
+};
+
 const baseColumns: DataTableColumns<any> = [
-  { title: 'Ref No', key: 'ref_no', sorter: (a, b) => a.ref_no.localeCompare(b.ref_no) },
+  { title: 'Ref No', key: 'ref_no', sorter: true, sortOrder: sortKey.value === 'ref_no' ? sortOrder.value : false },
   {
     title: 'Date',
     key: 'date',
     render: (row) => row.date ? new Date(row.date).toLocaleDateString() : 'N/A',
-    sorter: (a, b) => {
-      const dateA = a.date ? new Date(a.date).getTime() : 0
-      const dateB = b.date ? new Date(b.date).getTime() : 0
-      return dateA - dateB
-    }
+    sorter: true,
+    sortOrder: sortKey.value === 'date' ? sortOrder.value : false
   },
-  { title: 'Customer', key: 'customer_name', sorter: (a, b) => a.customer_name.localeCompare(b.customer_name) },
-  { title: 'Passenger', key: 'passenger_name', sorter: (a, b) => a.passenger_name.localeCompare(b.passenger_name) },
-  { title: 'Agent', key: 'agent_name', sorter: (a, b) => (a.agent_name || '').localeCompare(b.agent_name || '') },
-  { title: 'Paid to Agent', key: 'agent_paid', sorter: (a, b) => a.agent_paid - b.agent_paid },
-  { title: 'Customer Charge', key: 'customer_charge', sorter: (a, b) => a.customer_charge - b.customer_charge },
-  { title: 'Profit', key: 'profit', sorter: (a, b) => a.profit - b.profit, render: row => row.profit?.toFixed(2) },
+  { title: 'Customer', key: 'customer_name', sorter: true, sortOrder: sortKey.value === 'customer_name' ? sortOrder.value : false },
+  { title: 'Passenger', key: 'passenger_name', sorter: true, sortOrder: sortKey.value === 'passenger_name' ? sortOrder.value : false },
+  { title: 'Visa Type', key: 'visa_type_name', sorter: true, sortOrder: sortKey.value === 'visa_type_name' ? sortOrder.value : false },
+  { title: 'Agent', key: 'agent_name', sorter: true, sortOrder: sortKey.value === 'agent_name' ? sortOrder.value : false },
+  { title: 'Paid to Agent', key: 'agent_paid', sorter: true, sortOrder: sortKey.value === 'agent_paid' ? sortOrder.value : false },
+  { title: 'Customer Charge', key: 'customer_charge', sorter: true, sortOrder: sortKey.value === 'customer_charge' ? sortOrder.value : false },
+  { title: 'Profit', key: 'profit', sorter: true, sortOrder: sortKey.value === 'profit' ? sortOrder.value : false, render: row => row.profit?.toFixed(2) },
+  { title: 'Description', key: 'description' }
 ];
 
 const columnsBooked = ref<DataTableColumns<any>>([
@@ -445,32 +446,22 @@ const columnsCancelled = ref<DataTableColumns<any>>([
   },
 ]);
 
-const fetchData = async () => {
-  loading.value = true;
+const fetchVisaTypeOptions = async () => {
   try {
-    // Construct parameters to send to the backend
-    const params = {
-      status: activeTab.value === 'active' ? 'booked' : 'cancelled',
-      start_date: dateRange.value?.[0] ? formatDateForAPI(dateRange.value[0]) : undefined,
-      end_date: dateRange.value?.[1] ? formatDateForAPI(dateRange.value[1]) : undefined,
-      search_query: searchQuery.value,
-    };
-    
-    // Make the API call with the filters
-    const res = await api.get('/api/visas', { params });
-    
-    // Assign the response directly to the all visas array
-    allVisas.value = res.data;
+    const res = await api.get('/api/manage/visa_type');
+    visaTypeOptions.value = res.data.map((vt: any) => ({
+      label: vt.name,
+      value: vt.id
+    }));
   } catch (e) {
-    message.error('Failed to load visas');
-  } finally {
-    loading.value = false;
+    message.error('Failed to load visa types');
   }
 };
 
+const debouncedFetchData = debounce(fetchData, 500);
+
 const formatDateForAPI = (timestamp: number) => {
   const date = new Date(timestamp);
-  // Ensure the date is treated as a local date to prevent timezone shifts
   return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
 };
 
@@ -484,9 +475,8 @@ const exportExcel = async () => {
       search_query: searchQuery.value,
     };
     
-    // Check for empty data before making the API call
-    if (!dateRange.value || (dateRange.value[0] === dateRange.value[1] && allVisas.value.length === 0)) {
-        message.info('No data available in this date range to export.');
+    if (pagination.itemCount === 0) {
+        message.info('No data available to export.');
         return;
     }
 
@@ -517,9 +507,8 @@ const exportPDF = async () => {
       search_query: searchQuery.value,
     };
     
-    // Check for empty data before making the API call
-    if (!dateRange.value || (dateRange.value[0] === dateRange.value[1] && allVisas.value.length === 0)) {
-        message.info('No data available in this date range to export.');
+    if (pagination.itemCount === 0) {
+        message.info('No data available to export.');
         return;
     }
 
@@ -547,17 +536,14 @@ const openAttachmentsModal = (type: string, id: number) => {
 };
 
 
-const generatePlaceholder = () => {
-  const year = new Date().getFullYear();
-  const yearVisas = (allVisas.value || []).filter(v => v.ref_no && v.ref_no.startsWith(`${year}/V/`));
-  if (yearVisas.length === 0) return `${year}/V/00001`;
-  const lastNum = yearVisas.reduce((max, visa) => {
-    const parts = visa.ref_no.split('/');
-    if (parts.length < 3) return max;
-    const num = parseInt(parts[2]) || 0;
-    return Math.max(max, num);
-  }, 0);
-  return `${year}/V/${(lastNum + 1).toString().padStart(5, '0')}`;
+const generatePlaceholder = async () => {
+  try {
+    const { data } = await api.get('/api/visas/next_ref_no');
+    return data.ref_no;
+  } catch (e) {
+    message.error('Failed to generate reference number.');
+    return 'Error...';
+  }
 };
 
 const confirmCancelVisa = (row: any) => {
@@ -655,8 +641,8 @@ const handleApiError = (e: any) => {
   }
 };
 
-const openAddModal = () => {
-  referencePlaceholder.value = generatePlaceholder();
+const openAddModal = async () => {
+  referencePlaceholder.value = await generatePlaceholder();
   currentVisa.value = {
     id: null,
     customer_id: null,
@@ -668,6 +654,7 @@ const openAddModal = () => {
     visa_type_id: null,
     customer_charge: 0,
     agent_paid: 0,
+    description: '',
     customer_payment_mode: 'wallet',
     agent_payment_mode: 'wallet',
     date: Date.now(),
@@ -675,12 +662,17 @@ const openAddModal = () => {
   editMode.value = false;
   bulkAddMode.value = false;
   modalVisible.value = true;
+  await nextTick();
+  bookingFormRef.value?.fetchOptions();
 };
 
 const editVisa = (visa: any) => {
-  currentVisa.value = { ...visa };
+  currentVisa.value = { ...visa, date: visa.date ? new Date(visa.date).getTime() : null };
   editMode.value = true;
   modalVisible.value = true;
+  nextTick(() => {
+    bookingFormRef.value?.fetchOptions();
+  });
 };
 
 const handleFormSuccess = () => {
@@ -698,7 +690,6 @@ const openEntityModal = async (type: string, defaultName: string) => {
 
 const handleEntityCreated = async (event: any) => {
   const { type, data } = event;
-  await bookingFormRef.value?.fetchOptions();
   
   if (bookingFormRef.value && bookingFormRef.value.currentRecord) {
     if (type === 'passenger') {
@@ -707,8 +698,13 @@ const handleEntityCreated = async (event: any) => {
       bookingFormRef.value.currentRecord.particular_id = data.id;
     } else if (type === 'travel_location') {
       bookingFormRef.value.currentRecord.travel_location_id = data.id;
+    } else if (type === 'visa_type') {
+      bookingFormRef.value.currentRecord.visa_type_id = data.id;
     }
   }
+
+  // Tell the child component to re-fetch its options
+  await bookingFormRef.value?.fetchOptions();
   
   entityModalVisible.value = false;
 };
@@ -717,12 +713,19 @@ const handleEntityModalClose = (val: boolean) => {
   entityModalVisible.value = val;
 };
 
-// Use a single watch to handle all data fetching triggers
-watch([activeTab, searchQuery, dateRange], () => {
+watch([activeTab, dateRange], () => {
+  pagination.page = 1;
   fetchData();
-}, { deep: true, immediate: true });
+}, { deep: true });
+
+watch(searchQuery, () => {
+  pagination.page = 1;
+  debouncedFetchData();
+});
 
 onMounted(async () => {
   dateRange.value = defaultDateRange.value;
+  fetchVisaTypeOptions();
+  fetchData();
 });
 </script>

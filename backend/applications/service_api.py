@@ -12,6 +12,11 @@ class ServiceResource(Resource):
 
     @check_permission()
     def get(self):
+        query = Service.query
+
+        if request.args.get('action') == 'next_ref_no':
+            return {"ref_no": self._generate_reference_number()}, 200
+
         export_format = request.args.get('export')
         if export_format in ['excel', 'pdf']:
             return self.export_services(export_format)
@@ -20,10 +25,12 @@ class ServiceResource(Resource):
         start_date, end_date = self._parse_date_range()
         search_query = request.args.get('search_query', '')
         
-        # --- MODIFIED LOGIC FOR INCLUSIVE DATE RANGE ---
-        query = Service.query.filter(
-            Service.date.between(start_date, end_date)
-        )
+        if start_date and end_date:
+            end_date_plus = end_date + timedelta(days=1)
+            query = query.filter(
+                Service.date >= start_date,
+                Service.date < end_date_plus
+            )
         
         if status != 'all':
             query = query.filter_by(status=status)
@@ -77,21 +84,57 @@ class ServiceResource(Resource):
 
         try:
             if service.status == 'cancelled':
-                return self._delete_cancelled_service(service)
+                # Step 1: Reverse the refund transaction
+                if service.customer_refund_amount > 0:
+                    if service.customer_refund_mode == 'wallet':
+                        self._reverse_wallet_refund(service)
+                    elif service.customer_refund_mode in ['cash', 'online']:
+                        self._update_company_account(
+                            service.customer_refund_mode,
+                            service.customer_refund_amount,
+                            'reversal',
+                            f"Reversal of refund for service {service.id} deletion",
+                            service.ref_no
+                        )
+                
+                # Step 2: Reverse the original booking
+                if service.customer_payment_mode == 'wallet':
+                    self._reverse_wallet_payment(service)
+                elif service.customer_payment_mode in ['cash', 'online']:
+                    self._update_company_account(
+                        service.customer_payment_mode,
+                        -service.customer_charge,
+                        'reversal',
+                        f"Reversal of original booking for service {service.id} deletion",
+                        service.ref_no
+                    )
+
             else:
-                return self._delete_active_service(service)
+                self._reverse_wallet_payment(service)
+                self._update_company_account(
+                    service.customer_payment_mode,
+                    -service.customer_charge,
+                    'reversal',
+                    f"Reversal of booking for service {service.id} deletion",
+                    service.ref_no
+                )
+
+            # Step 3: Delete the service record
+            db.session.delete(service)
+            db.session.commit()
+            return {"message": "Service deleted successfully with transaction reversal"}
+
         except Exception as e:
             db.session.rollback()
             abort(500, f"Deletion failed: {str(e)}")
 
-    # ===== PRIVATE HELPER METHODS =====
+
     def _parse_date_range(self):
         start_date_str = request.args.get('start_date')
         end_date_str = request.args.get('end_date')
 
         if not start_date_str or not end_date_str:
-            end_date = datetime.now().date()
-            start_date = end_date - timedelta(days=7)
+            return None, None
         else:
             start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
             end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
@@ -112,6 +155,7 @@ class ServiceResource(Resource):
             'customer_payment_mode': service.customer_payment_mode,
             'customer_refund_amount': service.customer_refund_amount,
             'customer_refund_mode': service.customer_refund_mode,
+            'description': service.description,
             'created_at': service.created_at.isoformat(),
             'updated_at': service.updated_at.isoformat() if service.updated_at else None,
             'updated_by': service.updated_by
@@ -151,13 +195,13 @@ class ServiceResource(Resource):
         updated_by = getattr(g, 'username', 'system')
         updates = {
             'particular_id': data.get('particular_id', service.particular_id),
+            'description': data.get('description', service.description),
             'customer_charge': float(data.get('customer_charge', service.customer_charge)),
             'customer_payment_mode': data.get('customer_payment_mode', service.customer_payment_mode),
             'updated_by': updated_by,
             'updated_at': datetime.now()
         }
         
-        # Ensure incoming date string is correctly converted to a date object
         if 'date' in data:
             updates['date'] = datetime.strptime(data['date'], '%Y-%m-%d').date()
 
@@ -175,27 +219,73 @@ class ServiceResource(Resource):
             db.session.rollback()
             abort(500, f"Update failed: {str(e)}")
 
-    def _delete_cancelled_service(self, service):
-        net_effect = service.customer_charge - service.customer_refund_amount
-        
-        if net_effect != 0:
-            self._adjust_customer_balance(
-                service.customer_id, 
-                net_effect,  
-                service.customer_refund_mode,
-                f"Reversal for Service {service.id} deletion",
-                service_ref=service.ref_no
-            )
-        
-        db.session.delete(service)
-        db.session.commit()
-        return {"message": "Cancelled service deleted with transaction reversal"}
+    def _reverse_wallet_payment(self, service):
+        """Reverse a service payment made via wallet/credit."""
+        customer = Customer.query.get(service.customer_id)
+        if not customer:
+            return
 
-    def _delete_active_service(self, service):
-        self._reverse_payment(service)
-        db.session.delete(service)
-        db.session.commit()
-        return {"message": "Service deleted successfully"}
+        # Un-use credit first
+        amount_to_restore = service.customer_charge
+        
+        # Un-use credit first
+        credit_to_restore = min(amount_to_restore, customer.credit_used)
+        customer.credit_used -= credit_to_restore
+        remaining_to_restore = amount_to_restore - credit_to_restore
+        
+        # Credit the remaining amount to the wallet
+        customer.wallet_balance += remaining_to_restore
+
+    def _reverse_wallet_refund(self, service):
+        """Reverse a refund that was credited to the customer's wallet/credit."""
+        customer = Customer.query.get(service.customer_id)
+        if not customer:
+            return
+
+        # The refund was a credit to the customer. To reverse it, we must debit them.
+        # This means deducting from their wallet and then using their credit.
+        amount_to_reverse = service.customer_refund_amount
+        
+        # First, deduct from the wallet
+        wallet_deduction = min(amount_to_reverse, customer.wallet_balance)
+        customer.wallet_balance -= wallet_deduction
+        remaining_deduction = amount_to_reverse - wallet_deduction
+        
+        # Then, use credit for the remainder
+        if remaining_deduction > 0:
+            customer.credit_used += remaining_deduction
+
+
+    def _reverse_payment(self, service):
+        """Reverse the original payment transaction"""
+        if service.customer_payment_mode in ['cash', 'online']:
+            # Deduct original amount from company account
+            self._update_company_account(
+                service.customer_payment_mode,
+                -service.customer_charge,
+                'reversal',
+                f"Reversal of original booking for service {service.id} deletion",
+                service.ref_no
+            )
+        elif service.customer_payment_mode == 'wallet':
+            customer = Customer.query.get(service.customer_id)
+            if not customer:
+                return
+                
+            # Calculate how much credit was used for this service
+            credit_used_for_service = min(service.customer_charge, customer.credit_used)
+            amount_to_restore_credit = min(service.customer_charge, credit_used_for_service)
+            
+            # Restore credit used
+            customer.credit_used -= amount_to_restore_credit
+            
+            # Calculate remaining amount to credit to wallet
+            remaining_credit = service.customer_charge - amount_to_restore_credit
+            
+            # Add remaining to wallet
+            if remaining_credit > 0:
+                customer.wallet_balance += remaining_credit
+
 
     def _adjust_customer_balance(self, customer_id, amount, mode, description, service_ref=None):
         if customer := Customer.query.get(customer_id):
@@ -232,7 +322,6 @@ class ServiceResource(Resource):
         )
         db.session.add(entry)
 
-    # ===== SERVICE PROCESSING METHODS =====
     def book_service(self):
         data = request.json
         required = ['customer_id', 'customer_charge', 'customer_payment_mode', 'date']
@@ -243,6 +332,7 @@ class ServiceResource(Resource):
             service = Service(
                 customer_id=data['customer_id'],
                 particular_id=data.get('particular_id'),
+                description=data.get('description'),
                 customer_charge=data['customer_charge'],
                 customer_payment_mode=data['customer_payment_mode'],
                 date=datetime.strptime(data['date'], '%Y-%m-%d').date(), 
@@ -282,18 +372,15 @@ class ServiceResource(Resource):
         refund_amt = float(data.get('customer_refund_amount', 0))
         refund_mode = data.get('customer_refund_mode', 'cash').lower().strip()
 
-        try:
-            self._update_company_account(
-                service.customer_payment_mode,
-                -service.customer_charge,
-                'cancel',
-                f"Service {service.id} cancellation",
-                service.ref_no
-            )
-            
-            if refund_amt > 0:
-                self._process_refund(service, refund_amt, refund_mode)
+        # Validate refund amount
+        if refund_amt > service.customer_charge:
+            abort(400, "Refund amount cannot exceed original charge")
 
+        try:
+            # Process refund based on selected mode
+            self._process_refund(service, refund_amt, refund_mode)
+
+            # Update service record
             service.status = 'cancelled'
             service.updated_at = datetime.now()
             service.updated_by = getattr(g, 'username', 'system')
@@ -328,53 +415,45 @@ class ServiceResource(Resource):
                     else:
                         raise Exception("Insufficient customer credit")
 
-    def _reverse_payment(self, service):
-        if service.customer_payment_mode in ['cash', 'online']:
-            self._update_company_account(
-                service.customer_payment_mode,
-                -service.customer_charge,
-                'reversal',
-                f"Reversal for Service {service.id}",
-                service.ref_no
-            )
-            
-        if customer := Customer.query.get(service.customer_id):
-            if service.customer_payment_mode == 'wallet':
-                refund_to_credit = min(service.customer_charge, customer.credit_used)
-                customer.credit_used -= refund_to_credit
-                refund_to_wallet = service.customer_charge - refund_to_credit
-                customer.wallet_balance += refund_to_wallet
-
     def _process_refund(self, service, refund_amt, refund_mode):
-        if refund_amt > 0:
-            if customer := Customer.query.get(service.customer_id):
-                if refund_mode == 'wallet':
-                    refund_to_credit = min(refund_amt, customer.credit_used)
-                    customer.credit_used -= refund_to_credit
-                    refund_to_wallet = refund_amt - refund_to_credit
-                    customer.wallet_balance += refund_to_wallet
-                else:
-                    self._update_company_account(
-                        refund_mode,
-                        -refund_amt,
-                        'refund',
-                        f"Refund for Service {service.id}",
-                        service.ref_no
-                    )
-                    
-                service.customer_refund_amount = refund_amt
-                service.customer_refund_mode = refund_mode
+        if refund_amt > 0 and (customer := Customer.query.get(service.customer_id)):
+            if refund_mode == 'wallet':
+                # First restore credit used for this service
+                credit_used_for_service = min(service.customer_charge, customer.credit_used)
+                amount_to_restore_credit = min(refund_amt, credit_used_for_service)
+                
+                # Reduce credit used
+                customer.credit_used -= amount_to_restore_credit
+                
+                # Calculate remaining amount to credit to wallet
+                remaining_refund = refund_amt - amount_to_restore_credit
+                
+                # Add remaining to wallet
+                if remaining_refund > 0:
+                    customer.wallet_balance += remaining_refund
+            else:
+                # For cash/online refunds, deduct from company account
+                self._update_company_account(
+                    refund_mode,
+                    -refund_amt,
+                    'refund',
+                    f"Refund for Service {service.id}",
+                    service.ref_no
+                )
 
     def export_services(self, format_type):
         status = request.args.get('status', 'booked')
         start_date, end_date = self._parse_date_range()
         search_query = request.args.get('search_query', '')
-        end_date_plus = end_date + timedelta(days=1)
         
-        query = Service.query.filter(
-            Service.date >= start_date,
-            Service.date < end_date_plus
-        )
+        query = Service.query
+        
+        if start_date and end_date:
+            end_date_plus = end_date + timedelta(days=1)
+            query = query.filter(
+                Service.date >= start_date,
+                Service.date < end_date_plus
+            )
         
         if status != 'all':
             query = query.filter_by(status=status)
@@ -408,6 +487,7 @@ class ServiceResource(Resource):
             'Customer Charge': service.customer_charge,
             'Status': service.status.capitalize(),
             'Payment Mode': service.customer_payment_mode.capitalize(),
+            'Description': service.description,
         }
         
         if service.status == 'cancelled':
