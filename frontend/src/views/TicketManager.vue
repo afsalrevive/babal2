@@ -70,6 +70,7 @@
           @record-updated="handleFormSuccess"
           @open-entity-modal="openEntityModal"
           @cancel="modalVisible = false"
+          @request-new-ref-no="fetchNewReferenceNumber"
           ref="bookingFormRef"
         />
       </n-card>
@@ -259,8 +260,8 @@ const currentTicket = ref<any>({
   customer_charge: 0,
   agent_paid: 0,
   description: '',
-  customer_payment_mode: 'cash',
-  agent_payment_mode: 'cash',
+  customer_payment_mode: null,
+  agent_payment_mode: null,
   date: Date.now(),
 });
 
@@ -276,7 +277,7 @@ const cancelData = ref({
 const paymentModeOptions = [
   { label: 'Cash', value: 'cash' },
   { label: 'Online', value: 'online' },
-  { label: 'Wallet', value: 'wallet' },
+  { label: 'Wallet/Credit', value: 'wallet' },
 ];
 
 const referencePlaceholder = ref('');
@@ -286,6 +287,10 @@ const referenceNumber = computed(() => {
   }
   return referencePlaceholder.value || 'Generating...';
 });
+
+const fetchNewReferenceNumber = async () => {
+    referencePlaceholder.value = await generatePlaceholder();
+};
 
 const pagination = reactive({
   page: 1,
@@ -653,8 +658,8 @@ const openAddModal = async () => {
     customer_charge: 0,
     agent_paid: 0,
     description: '',
-    customer_payment_mode: 'wallet',
-    agent_payment_mode: 'wallet',
+    customer_payment_mode: null,
+    agent_payment_mode: null,
     date: Date.now(),
   };
   editMode.value = false;
@@ -728,3 +733,7 @@ onMounted(async () => {
   fetchData();
 });
 </script>
+
+<style scoped lang="scss">
+@use '@/styles/theme' as *;
+</style>

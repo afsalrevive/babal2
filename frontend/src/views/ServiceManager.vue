@@ -101,6 +101,7 @@
           @record-updated="handleFormSuccess"
           @cancel="modalVisible = false"
           @open-entity-modal="openEntityModal"
+          @request-new-ref-no="fetchNewReferenceNumber"
           ref="bookingFormRef"
         />
       </n-card>
@@ -216,7 +217,6 @@ import { DocumentTextOutline } from '@vicons/ionicons5'
 import AttachmentModal from './AttachmentModal.vue'
 import ServiceBookingForm from './ServiceBookingForm.vue'
 import EntityFormModal from './EntityFormModal.vue'
-import { debounce } from 'lodash'
 
 const message = useMessage()
 const bookingFormRef = ref<any>(null)
@@ -230,7 +230,6 @@ const modalVisible = ref(false)
 const cancelModalVisible = ref(false)
 const editCancelledModalVisible = ref(false)
 const editMode = ref(false)
-const formRef = ref<any>(null)
 
 const showDeleteModal = ref(false);
 const showCancelConfirmModal = ref(false);
@@ -266,7 +265,7 @@ onMounted(() => {
 const paymentModeOptions = [
   { label: 'Cash', value: 'cash' },
   { label: 'Online', value: 'online' },
-  { label: 'Wallet', value: 'wallet' },
+  { label: 'Wallet/Credit', value: 'wallet' },
 ]
 
 const currentService = ref<any>({
@@ -274,7 +273,7 @@ const currentService = ref<any>({
   particular_id: null,
   ref_no: '',
   customer_charge: 0,
-  customer_payment_mode: 'cash',
+  customer_payment_mode: null,
   date: Date.now()
 })
 
@@ -359,6 +358,11 @@ const fetchData = async () => {
   }
 }
 
+const fetchNewReferenceNumber = async () => {
+  referencePlaceholder.value = await generatePlaceholder();
+};
+
+
 const formatDateForAPI = (timestamp: number) => {
   const date = new Date(timestamp);
   return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
@@ -386,7 +390,7 @@ const openAddModal = async () => {
     particular_id: null,
     ref_no: '',
     customer_charge: 0,
-    customer_payment_mode: 'cash',
+    customer_payment_mode: null,
     date: Date.now(),
     description: ''
   };
@@ -396,28 +400,8 @@ const openAddModal = async () => {
   bulkAddMode.value = false;
 };
 
-const handleFormSuccess = async (event: any) => {
-  if (bulkAddMode.value) {
-    message.info('Form cleared for next entry.');
-    
-    // FIX: Create a new object to trigger reactivity
-    currentService.value = {
-      // Preserve these fields from the last submission
-      particular_id: event.particular_id,
-      date: new Date(event.date).getTime(),
-      customer_payment_mode: event.customer_payment_mode,
-      
-      // Reset these fields for next entry
-      customer_id: null,
-      customer_charge: 0,
-      description: '',
-      ref_no: ''
-    };
-
-    nextTick(async () => {
-      referencePlaceholder.value = await generatePlaceholder();
-    });
-  } else {
+const handleFormSuccess = async (isBulkAdd: boolean) => {
+  if (!isBulkAdd) {
     modalVisible.value = false;
   }
   fetchData();

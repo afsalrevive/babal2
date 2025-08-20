@@ -101,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, reactive, nextTick } from 'vue';
+import { ref, computed, onMounted, watch, reactive } from 'vue';
 import { useMessage, NButton, NSpace, NForm, NFormItem, NSelect, NGrid, NGi, NText, NInput, NDatePicker, NInputNumber, NSwitch } from 'naive-ui';
 import type { FormRules } from 'naive-ui';
 import api from '@/api';
@@ -114,7 +114,8 @@ const props = defineProps({
   referenceNumber: { type: String, required: true },
 });
 
-const emits = defineEmits(['record-booked', 'record-updated', 'cancel', 'update:bulkAddMode', 'open-entity-modal']);
+const emits = defineEmits(['record-booked', 'record-updated', 'cancel', 'update:bulkAddMode', 'open-entity-modal', 'request-new-ref-no']);
+
 const message = useMessage();
 const formRef = ref<any>(null);
 
@@ -123,7 +124,7 @@ const form = reactive({
   particular_id: props.formData.particular_id ?? null,
   ref_no: props.formData.ref_no ?? '',
   customer_charge: props.formData.customer_charge ?? 0,
-  customer_payment_mode: props.formData.customer_payment_mode ?? 'cash',
+  customer_payment_mode: props.formData.customer_payment_mode ?? null,
   date: props.formData.date ? new Date(props.formData.date).getTime() : Date.now(),
   description: props.formData.description ?? '',
 });
@@ -139,7 +140,7 @@ const localBulkAddMode = computed({
 const paymentModeOptions = [
   { label: 'Cash', value: 'cash' },
   { label: 'Online', value: 'online' },
-  { label: 'Wallet', value: 'wallet' },
+  { label: 'Wallet/Credit', value: 'wallet' },
 ];
 
 const selectedCustomer = computed(() => {
@@ -238,7 +239,29 @@ const submitForm = async () => {
     } else {
       const response = await api.post('/api/services', payload);
       message.success(`Service booked! Reference: ${response.data.ref_no}`);
-      emits('record-booked', { ...payload, ...response.data });
+      
+      if (localBulkAddMode.value) {
+        Object.assign(form, {
+          customer_id: null,
+          customer_charge: 0,
+          customer_payment_mode: null,
+          description: '',
+          ref_no: ''
+        });
+        
+        // Retain the particular and date for convenience
+        form.particular_id = payload.particular_id;
+        form.date = selectedDate.getTime();
+
+        // Emit a new event to the parent to fetch the next reference number
+        emits('request-new-ref-no');
+        
+        // **NEW:** Emit record-booked to trigger the parent's data refresh
+        emits('record-booked', { ...payload, ...response.data });
+
+      } else {
+        emits('record-booked', { ...payload, ...response.data });
+      }
     }
   } catch (e) {
     handleApiError(e);

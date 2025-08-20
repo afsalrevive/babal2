@@ -70,6 +70,7 @@
           @record-updated="handleFormSuccess"
           @open-entity-modal="openEntityModal"
           @cancel="modalVisible = false"
+          @request-new-ref-no="fetchNewReferenceNumber"
           ref="bookingFormRef"
         />
       </n-card>
@@ -200,7 +201,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, h, reactive, watch, nextTick } from 'vue';
-import { useMessage, NButton, NSpace, NForm, NFormItem, NInputNumber, NInput, NSelect, NDivider, NAlert, NModal, NCard, NH3, NIcon, NH2, NSwitch, NDataTable } from 'naive-ui';
+import { useMessage, NButton, NSpace, NForm, NFormItem, NInputNumber, NInput, NSelect, NDivider, NAlert, NModal, NCard, NH3, NIcon, NH2,  NDataTable } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
 import api from '@/api';
 import PermissionWrapper from '@/components/PermissionWrapper.vue';
@@ -259,8 +260,8 @@ const currentVisa = ref<any>({
   customer_charge: 0,
   agent_paid: 0,
   description: '',
-  customer_payment_mode: 'cash',
-  agent_payment_mode: 'cash',
+  customer_payment_mode: null,
+  agent_payment_mode: null,
   date: Date.now(),
 });
 
@@ -276,7 +277,7 @@ const cancelData = ref({
 const paymentModeOptions = [
   { label: 'Cash', value: 'cash' },
   { label: 'Online', value: 'online' },
-  { label: 'Wallet', value: 'wallet' },
+  { label: 'Wallet/Credit', value: 'wallet' },
 ];
 
 const referencePlaceholder = ref('');
@@ -287,7 +288,10 @@ const referenceNumber = computed(() => {
   return referencePlaceholder.value || 'Generating...';
 });
 
-// Server-side pagination and sorting state
+const fetchNewReferenceNumber = async () => {
+    referencePlaceholder.value = await generatePlaceholder();
+};
+
 const pagination = reactive({
   page: 1,
   pageSize: 20,
@@ -655,8 +659,8 @@ const openAddModal = async () => {
     customer_charge: 0,
     agent_paid: 0,
     description: '',
-    customer_payment_mode: 'wallet',
-    agent_payment_mode: 'wallet',
+    customer_payment_mode: null,
+    agent_payment_mode: null,
     date: Date.now(),
   };
   editMode.value = false;
@@ -729,3 +733,7 @@ onMounted(async () => {
   fetchData();
 });
 </script>
+
+<style scoped lang="scss">
+@use '@/styles/theme' as *;
+</style>

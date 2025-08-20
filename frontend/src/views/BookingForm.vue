@@ -31,10 +31,10 @@
           />
           <n-grid v-if="selectedCustomer" :cols="2" x-gap="12">
             <n-gi>
-              <n-text type="info">Wallet: {{ selectedCustomer.wallet_balance }}</n-text>
+              <n-text type="info">Wallet: {{ selectedCustomer.wallet_balance.toFixed(2) }}</n-text>
             </n-gi>
             <n-gi>
-              <n-text type="warning">Credit: {{ selectedCustomer.credit_used }}/{{ selectedCustomer.credit_limit }}</n-text>
+              <n-text type="warning">Credit Used: {{ selectedCustomer.credit_used.toFixed(2) }}/{{ selectedCustomer.credit_limit.toFixed(2) }}</n-text>
             </n-gi>
           </n-grid>
         </n-space>
@@ -190,7 +190,7 @@
               <n-text type="info">Wallet: {{ selectedAgent.wallet_balance.toFixed(2) }}</n-text>
             </n-gi>
             <n-gi>
-              <n-text type="warning">Credit: {{ selectedAgent.credit_used.toFixed(2) }}/{{ selectedAgent.credit_limit.toFixed(2) }}</n-text>
+              <n-text type="warning">Credit Used: {{ selectedAgent.credit_used.toFixed(2) }}/{{ selectedAgent.credit_limit.toFixed(2) }}</n-text>
             </n-gi>
           </n-grid>
         </n-space>
@@ -301,7 +301,7 @@ const props = defineProps({
   bulkAddMode: { type: Boolean, default: false },
 });
 
-const emits = defineEmits(['record-booked', 'record-updated', 'open-entity-modal', 'cancel', 'update:bulkAddMode']);
+const emits = defineEmits(['record-booked', 'record-updated', 'open-entity-modal', 'cancel', 'update:bulkAddMode','request-new-ref-no']);
 
 const message = useMessage();
 const formRef = ref<FormInst | null>(null);
@@ -335,7 +335,7 @@ const preventUpdate = ref(false);
 const paymentModeOptions: SelectOption[] = [
   { label: 'Cash', value: 'cash' },
   { label: 'Online', value: 'online' },
-  { label: 'Wallet', value: 'wallet' },
+  { label: 'Wallet/Credit', value: 'wallet' },
 ];
 
 const profitPercentage = ref(10);
@@ -550,11 +550,13 @@ const submitForm = async () => {
       await api.post(endpoint, payload);
       message.success(`${props.isVisaManagement ? 'Visa' : 'Ticket'} booked!`);
       if (localBulkAddMode.value) {
-        const fieldsToReset = ['passenger_id', 'customer_id', 'agent_id', 'customer_paid','agent_paid'];
+        const fieldsToReset = ['passenger_id', 'customer_id', 'agent_id', 'customer_charge','agent_paid','customer_payment_mode', 'agent_payment_mode', 'description'];
         fieldsToReset.forEach(key => {
           currentRecord.value[key] = null;
         });
         currentRecord.value.ref_no = '';
+        emits('request-new-ref-no');
+        emits('record-booked', payload);
         nextTick(() => formRef.value?.restoreValidation());
       } else {
         emits('record-booked', payload);
