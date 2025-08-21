@@ -61,8 +61,8 @@ def create_app():
             "origins": [
                 "http://localhost:5173",
                 "http://127.0.0.1:5173",
-                "http://83.229.39.190:5173",  # add your public IP
-                "http://83.229.39.190"        # in case it's served without port 5173
+                "http://84.247.164.168:5173",  # add your public IP
+                "http://84.247.164.168"        # in case it's served without port 5173
             ],
             "supports_credentials": True,
             "allow_headers": ["Authorization", "Content-Type"],
