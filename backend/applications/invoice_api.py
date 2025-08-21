@@ -1,4 +1,4 @@
-from flask import request, abort, send_file
+from flask import request, abort, send_file, current_app
 from flask_restful import Resource
 from applications.utils import check_permission
 from applications.model import db, Customer, Agent, Partner, Transaction, Ticket, Visa, Service, Invoice
@@ -9,17 +9,7 @@ from fpdf import FPDF
 from sqlalchemy import or_, and_ 
 from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
-from io import BytesIO
-import tempfile
 import xlsxwriter
-
-# ========= Paths =========
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PDF_SAVE_DIR = os.path.join(BASE_DIR, 'invoices')
-os.makedirs(PDF_SAVE_DIR, exist_ok=True)
-
-HEADER_PATH = os.path.join(BASE_DIR, 'templates', 'header1.jpg')
-FOOTER_PATH = os.path.join(BASE_DIR, 'templates', 'footer1.jpg')
 
 # ========= Helpers =========
 def generate_invoice_number(entity_type):
@@ -65,14 +55,16 @@ def parse_date(date_input):
 # ========= Core Logic =========
 class PDF(FPDF):
     def header(self):
-        if os.path.exists(HEADER_PATH):
-            self.image(HEADER_PATH, x=0, y=0, w=self.w)
+        header_path = os.path.join(current_app.config['TEMPLATE_FOLDER'], 'header1.jpg')
+        if os.path.exists(header_path):
+            self.image(header_path, x=0, y=0, w=self.w)
         self.set_y(50)
         
     def footer(self):
         self.set_y(-50)
-        if os.path.exists(FOOTER_PATH):
-            self.image(FOOTER_PATH, x=0, y=self.get_y(), w=self.w)
+        footer_path = os.path.join(current_app.config['TEMPLATE_FOLDER'], 'footer1.jpg')
+        if os.path.exists(footer_path):
+            self.image(footer_path, x=0, y=self.get_y(), w=self.w)
 
     def chapter_title(self, title, is_table_header=False):
         """Method to print chapter title and optionally set up for a table."""
@@ -613,12 +605,15 @@ class InvoiceListResource(Resource, InvoiceCore):
         # Create safe filename
         safe_filename = invoice_number.replace('/', '-') + '.pdf'
         
-        entity_folder = os.path.join(PDF_SAVE_DIR, f"{entity_type}s")
+        entity_folder = os.path.join(current_app.config['INVOICE_FOLDER'], f"{entity_type}s")
         os.makedirs(entity_folder, exist_ok=True)
 
-        pdf_path = os.path.join(entity_folder, safe_filename)
-        with open(pdf_path, 'wb') as f:
+        absolute_pdf_path = os.path.join(entity_folder, safe_filename)
+        with open(absolute_pdf_path, 'wb') as f:
             f.write(pdf_bytes)
+
+        # Store the path relative to the base directory
+        relative_pdf_path = os.path.relpath(absolute_pdf_path, current_app.config['INVOICE_FOLDER'])
 
         invoice = Invoice(
             invoice_number=invoice_number,
@@ -627,7 +622,7 @@ class InvoiceListResource(Resource, InvoiceCore):
             period_start=period_start,
             period_end=period_end,
             status='pending',
-            pdf_path=pdf_path
+            pdf_path=relative_pdf_path
         )
         db.session.add(invoice)
         db.session.commit()
@@ -660,15 +655,16 @@ class InvoiceStatusResource(Resource, InvoiceCore):
         invoice.status = new_status
         
         if new_status in ['paid', 'cancelled'] and old_status != new_status:
-            if not invoice.pdf_path or not os.path.exists(invoice.pdf_path):
+            absolute_pdf_path = os.path.join(current_app.config['INVOICE_FOLDER'], invoice.pdf_path)
+            if not invoice.pdf_path or not os.path.exists(absolute_pdf_path):
                 abort(404, "Invoice PDF not found.")
                 
-            with open(invoice.pdf_path, 'rb') as f:
+            with open(absolute_pdf_path, 'rb') as f:
                 original_pdf = f.read()
             
             stamped_pdf = self.apply_stamp(original_pdf, new_status)
             
-            with open(invoice.pdf_path, 'wb') as f:
+            with open(absolute_pdf_path, 'wb') as f:
                 f.write(stamped_pdf)
         
         db.session.commit()
@@ -680,10 +676,13 @@ class InvoiceDownloadResource(Resource, InvoiceCore):
         invoice = Invoice.query.get(invoice_id)
         if not invoice:
             abort(404, "Invoice not found.")
-        if not invoice.pdf_path or not os.path.exists(invoice.pdf_path):
+        
+        absolute_pdf_path = os.path.join(current_app.config['INVOICE_FOLDER'], invoice.pdf_path)
+
+        if not invoice.pdf_path or not os.path.exists(absolute_pdf_path):
             abort(404, "Invoice PDF not found.")
         
-        with open(invoice.pdf_path, 'rb') as f:
+        with open(absolute_pdf_path, 'rb') as f:
             original_pdf = f.read()
         
         if invoice.status in ['paid', 'cancelled']:
@@ -696,7 +695,7 @@ class InvoiceDownloadResource(Resource, InvoiceCore):
             )
         
         return send_file(
-            invoice.pdf_path,
+            absolute_pdf_path,
             as_attachment=True,
             download_name=f"{invoice.invoice_number}.pdf",
             mimetype="application/pdf"
@@ -709,16 +708,17 @@ class InvoiceDeleteResource(Resource):
         if not invoice:
             abort(404, "Invoice not found.")
 
-        if invoice.pdf_path and os.path.exists(invoice.pdf_path):
+        absolute_pdf_path = os.path.join(current_app.config['INVOICE_FOLDER'], invoice.pdf_path)
+
+        if invoice.pdf_path and os.path.exists(absolute_pdf_path):
             try:
-                os.remove(invoice.pdf_path)
+                os.remove(absolute_pdf_path)
             except OSError as e:
                 print(f"Error deleting PDF file: {e}")
 
         db.session.delete(invoice)
         db.session.commit()
         return {"message": "Invoice deleted successfully."}, 200
-
 
 class InvoiceExportResource(Resource, InvoiceCore):
     @check_permission()

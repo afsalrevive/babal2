@@ -34,7 +34,7 @@
               PDF
             </n-button>
           </n-space>
-          <PermissionWrapper resource="service" operation="write">
+          <PermissionWrapper resource="services" operation="write">
             <n-button type="primary" @click="openAddModal">Book Service</n-button>
           </PermissionWrapper>
         </n-space>
@@ -128,7 +128,7 @@
 
           <n-space class="action-buttons" justify="end">
             <n-button @click="cancelModalVisible = false">Cancel</n-button>
-            <PermissionWrapper resource="service" operation="modify">
+            <PermissionWrapper resource="services" operation="modify">
               <n-button type="error" @click="confirmCancel">Confirm Cancellation</n-button>
             </PermissionWrapper>
           </n-space>
@@ -157,7 +157,7 @@
 
           <n-space class="action-buttons" justify="end">
             <n-button @click="editCancelledModalVisible = false">Cancel</n-button>
-            <PermissionWrapper resource="service" operation="modify">
+            <PermissionWrapper resource="services" operation="modify">
               <n-button type="primary" @click="updateCancelledService">Update</n-button>
             </PermissionWrapper>
           </n-space>
@@ -558,13 +558,13 @@ const columnsActive = ref<DataTableColumns<any>>([
     render(row) {
       if (row.status !== 'booked') return null;
       return h(NSpace, { size: 'small' }, () => [
-        h(PermissionWrapper, { resource: 'service', operation: 'modify' }, {
+        h(PermissionWrapper, { resource: 'services', operation: 'modify' }, {
           default: () => h(NButton, { size: 'small', onClick: () => editService(row) }, { default: () => 'Edit' })
         }),
-        h(PermissionWrapper, { resource: 'service', operation: 'full' }, {
+        h(PermissionWrapper, { resource: 'services', operation: 'full' }, {
           default: () => h(NButton, { size: 'small', type: 'error', onClick: () => handleConfirmDelete(row.id) }, { default: () => 'Delete' })
         }),
-        h(PermissionWrapper, { resource: 'service', operation: 'modify' }, {
+        h(PermissionWrapper, { resource: 'services', operation: 'modify' }, {
           default: () => h(NButton, { size: 'small', type: 'warning', onClick: () => openCancelModal(row) }, { default: () => 'Cancel' })
         }),
       ])
@@ -575,10 +575,10 @@ const columnsActive = ref<DataTableColumns<any>>([
     key: 'attachments',
     width: 120,
     render(row) {
-      return h(PermissionWrapper, { resource: 'service', operation: 'read' }, {
+      return h(PermissionWrapper, { resource: 'services', operation: 'read' }, {
         default: () => h(NButton, {
           size: 'small',
-          onClick: () => openAttachmentsModal('service', row.id)
+          onClick: () => openAttachmentsModal('services', row.id)
         }, { default: () => `Manage` })
       })
     }
@@ -599,13 +599,13 @@ const columnsCancelled = ref<DataTableColumns<any>>([
     render(row) {
       if (row.status !== 'cancelled') return null;
       return h(NSpace, { size: 'small' }, () => [
-        h(PermissionWrapper, { resource: 'service', operation: 'modify' }, {
+        h(PermissionWrapper, { resource: 'services', operation: 'modify' }, {
           default: () => h(NButton, {
             size: 'small',
             onClick: () => editCancelledService(row)
           }, { default: () => 'Edit Refund' })
         }),
-        h(PermissionWrapper, { resource: 'service', operation: 'full' }, {
+        h(PermissionWrapper, { resource: 'services', operation: 'full' }, {
           default: () => h(NButton, {
             size: 'small',
             type: 'error',
@@ -620,10 +620,10 @@ const columnsCancelled = ref<DataTableColumns<any>>([
     key: 'attachments',
     width: 120,
     render(row) {
-      return h(PermissionWrapper, { resource: 'service', operation: 'read' }, {
+      return h(PermissionWrapper, { resource: 'services', operation: 'read' }, {
         default: () => h(NButton, {
           size: 'small',
-          onClick: () => openAttachmentsModal('service', row.id)
+          onClick: () => openAttachmentsModal('services', row.id)
         }, { default: () => `Manage` })
       })
     }

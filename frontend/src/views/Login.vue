@@ -30,12 +30,6 @@
             />
           </n-form-item>
           <n-button type="primary" block @click="submit">Login</n-button>
-
-          <div style="text-align: center; margin-top: 16px;">
-            <n-button text @click="router.push('/signup')">
-              Don't have an account? Sign Up
-            </n-button>
-          </div>
         </n-form>
       </n-card>
     </n-layout-content>

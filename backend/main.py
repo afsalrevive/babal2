@@ -37,9 +37,19 @@ def create_app():
     UPLOAD_FOLDER = os.path.join(current_dir, 'uploads')
     app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-    # Ensure the upload folder exists
+    #Invoice related paths
+    INVOICE_FOLDER = os.path.join(current_dir, 'invoices')
+    app.config['INVOICE_FOLDER'] = INVOICE_FOLDER
+
+    # Template folder for rendering HTML
+    TEMPLATE_FOLDER = os.path.join(current_dir, 'templates')
+    app.config['TEMPLATE_FOLDER'] = TEMPLATE_FOLDER
+
+    # Ensure the folder exists
     if not os.path.exists(UPLOAD_FOLDER):
         os.makedirs(UPLOAD_FOLDER)
+    if not os.path.exists(INVOICE_FOLDER):
+        os.makedirs(INVOICE_FOLDER)
 
     # JWT
     app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "revive_token_key")

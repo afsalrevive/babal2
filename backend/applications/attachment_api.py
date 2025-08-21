@@ -49,8 +49,6 @@ def get_upload_path(parent_type, parent_id):
     return base_folder
     
 
-
-
 class AttachmentResource(Resource):
     def __init__(self, **kwargs):
         super().__init__()
@@ -61,14 +59,22 @@ class AttachmentResource(Resource):
             attachment = Attachment.query.get(attachment_id)
             if not attachment:
                 abort(404, "Attachment not found")
-            return send_file(attachment.file_path, as_attachment=True, download_name=attachment.file_name)
+            
+            # Reconstruct the absolute file path for serving
+            absolute_file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], attachment.file_path)
+            
+            if not os.path.exists(absolute_file_path):
+                abort(404, "File not found on disk.")
+            
+            return send_file(absolute_file_path, as_attachment=True, download_name=attachment.file_name)
         
+        # The rest of the get method remains the same
         if parent_type and parent_id:
             attachments = Attachment.query.filter_by(parent_type=parent_type, parent_id=parent_id).all()
             return [{"id": a.id, "file_name": a.file_name} for a in attachments], 200
         
         abort(400, "Invalid request. Specify parent_type/id or attachment_id.")
-
+    
     @check_permission()
     def post(self, parent_type, parent_id):
         if 'file' not in request.files:
@@ -79,6 +85,7 @@ class AttachmentResource(Resource):
             abort(400, "No selected file")
 
         if file:
+            # The upload path is still absolute for saving the file
             upload_path = get_upload_path(parent_type, parent_id)
             original_filename = secure_filename(file.filename)
             prefix = ""
@@ -88,7 +95,6 @@ class AttachmentResource(Resource):
                 parent_obj = model.query.get(parent_id)
                 if parent_obj:
                     if hasattr(parent_obj, 'ref_no'):
-                        # Sanitize the ref_no by replacing slashes with a safe character
                         sanitized_ref_no = parent_obj.ref_no.replace('/', '-')
                         prefix = f"{sanitized_ref_no}_"
                     elif hasattr(parent_obj, 'name'):
@@ -96,12 +102,17 @@ class AttachmentResource(Resource):
                         prefix = f"{sanitized_name}_"
 
             unique_filename = f"{prefix}{datetime.now().strftime('%Y%m%d%H%M%S')}_{original_filename}"
-            file_path = os.path.join(upload_path, unique_filename)
-            file.save(file_path)
+            
+            # Create the absolute file path to save the file
+            absolute_file_path = os.path.join(upload_path, unique_filename)
+            file.save(absolute_file_path)
+            
+            # Here's the key change: store the path relative to the UPLOAD_FOLDER
+            relative_file_path = os.path.relpath(absolute_file_path, current_app.config['UPLOAD_FOLDER'])
             
             new_attachment = Attachment(
                 file_name=original_filename,
-                file_path=file_path,
+                file_path=relative_file_path,  # Save the relative path
                 parent_type=parent_type,
                 parent_id=parent_id,
             )
@@ -119,7 +130,13 @@ class AttachmentResource(Resource):
         try:
             db.session.delete(attachment)
             db.session.commit()
-            os.remove(attachment.file_path) 
+            
+            # Reconstruct the absolute file path for deletion
+            absolute_file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], attachment.file_path)
+            
+            if os.path.exists(absolute_file_path):
+                os.remove(absolute_file_path) 
+            
             return {"message": "Attachment deleted"}, 200
         except OSError as e:
             db.session.rollback()
