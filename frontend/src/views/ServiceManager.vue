@@ -539,7 +539,17 @@ const handleEntityModalClose = (val: boolean) => {
 // Table columns
 const baseColumns: DataTableColumns<any> = [
   { title: 'Ref No', key: 'ref_no', sorter: (a, b) => a.ref_no.localeCompare(b.ref_no) },
-  { title: 'Date', key: 'date', render: (row) => row.date ? new Date(row.date).toLocaleDateString() : 'N/A' },
+  { 
+    title: 'Date', 
+    key: 'date', 
+    render: (row) => row.date ? new Date(row.date).toLocaleDateString() : 'N/A',
+    // Added sorter function for date
+    sorter: (a, b) => {
+      const dateA = a.date ? new Date(a.date).getTime() : 0;
+      const dateB = b.date ? new Date(b.date).getTime() : 0;
+      return dateA - dateB;
+    }
+  },
   { title: 'Customer', key: 'customer_name', sorter: (a, b) => a.customer_name.localeCompare(b.customer_name) },
   { title: 'Particular', key: 'particular_name', sorter: (a, b) => a.particular_name.localeCompare(b.particular_name) },
   { title: 'Charge', key: 'customer_charge', sorter: (a, b) => a.customer_charge - b.customer_charge },

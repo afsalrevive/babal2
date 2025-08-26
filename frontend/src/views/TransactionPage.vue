@@ -618,19 +618,33 @@ const fetchSchema = async () => {
   }
 };
 
+
 const fetchTransactions = async () => {
   loading.value = true
   try {
-    const params: any = { 
+    const params: any = {
       transaction_type: transactionType.value,
       page: pagination.page,
       per_page: pagination.pageSize,
       search_query: searchQuery.value,
     }
-    
+
     // Add date filters if set
-    if (dateRange.value?.[0]) params.start_date = new Date(dateRange.value[0]).toISOString().split('T')[0]
-    if (dateRange.value?.[1]) params.end_date = new Date(dateRange.value[1]).toISOString().split('T')[0]
+    if (dateRange.value?.[0] && dateRange.value?.[1]) {
+      const startDate = new Date(dateRange.value[0]);
+      const endDate = new Date(dateRange.value[1]);
+
+      // Manually format dates to YYYY-MM-DD without a timezone offset
+      const formatDate = (date) => {
+        const year = date.getFullYear();
+        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+        const day = date.getDate().toString().padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+
+      params.start_date = formatDate(startDate);
+      params.end_date = formatDate(endDate);
+    }
     
     // Add sorting parameters
     if (sortKey.value && sortOrder.value) {
