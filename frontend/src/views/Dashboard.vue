@@ -59,7 +59,7 @@
             <n-spin :show="loadingMetrics" size="large">
               <n-grid x-gap="16" y-gap="16" :cols="3" :sm="3" :md="4" class="mt-4">
                 <n-gi>
-                  <n-statistic label="Total Ticket Sales" :value="formatCurrency(metrics.totalTicketSales)" class="text-purple-700 text-sm" />
+                  <n-statistic label="Total Sales" :value="formatCurrency(metrics.totalSales)" class="text-purple-700 text-sm" />
                 </n-gi>
                 <n-gi>
                   <n-statistic label="Total Agent Charges" :value="formatCurrency(metrics.totalAgentCharges)" class="text-orange-700 text-sm" />
@@ -87,6 +87,15 @@
                 </n-gi>
                 <n-gi>
                   <n-statistic label="Total Customer Credit" :value="formatCurrency(metrics.totalCustomerCredit)" class="text-cyan-700 text-sm" />
+                </n-gi>
+                <n-gi>
+                  <n-statistic label="Total Cancelled Sales" :value="formatCurrency(metrics.totalCancelledSales)" class="text-gray-700 text-sm" />
+                </n-gi>
+                <n-gi>
+                  <n-statistic label="Total Customer Refund" :value="formatCurrency(metrics.totalCustomerRefundAmount)" class="text-gray-700 text-sm" />
+                </n-gi>
+                <n-gi>
+                  <n-statistic label="Total Agent Refund" :value="formatCurrency(metrics.totalAgentRefundAmount)" class="text-red-500 text-sm" />
                 </n-gi>
               </n-grid>
             </n-spin>
@@ -199,7 +208,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, onBeforeUnmount, h } from 'vue'; 
+import { ref, onMounted, watch, onBeforeUnmount, h } from 'vue';
 import {
   NSpace,
   NH1,
@@ -247,7 +256,7 @@ const message = useMessage();
 
 const balances = ref({ cash: 0, online: 0 });
 const metrics = ref({
-  totalTicketSales: 0,
+  totalSales: 0,
   totalAgentCharges: 0,
   profitFromSales: 0,
   otherServiceIncome: 0,
@@ -257,6 +266,9 @@ const metrics = ref({
   totalCustomerDeposit: 0,
   totalAgentCredit: 0,
   totalCustomerCredit: 0,
+  totalCustomerRefundAmount: 0,
+  totalAgentRefundAmount: 0,
+  totalCancelledSales: 0, // Added missing metric
 });
 const dateRange = ref(null);
 
@@ -293,7 +305,7 @@ const partnerBalances = ref([]);
 const formatCurrency = (value) => {
   return new Intl.NumberFormat('en-AE', {
     style: 'currency',
-    currency: 'AED', 
+    currency: 'AED',
     minimumFractionDigits: 2,
   }).format(value);
 };
@@ -327,17 +339,20 @@ const fetchCompanyBalances = async () => {
   }
 };
 
+// Function to format date to YYYY-MM-DD
+const formatDate = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const fetchDashboardData = async () => {
   loadingMetrics.value = true;
   loadingCharts.value = true;
 
-  const startDate = dateRange.value ? new Date(dateRange.value[0]).toISOString().split('T')[0] : '';
-  let endDate = '';
-  if (dateRange.value) {
-    const selectedEndDate = new Date(dateRange.value[1]);
-    selectedEndDate.setHours(23, 59, 59, 999); // Set to end of the day
-    endDate = selectedEndDate.toISOString().split('T')[0];
-  }
+  const startDate = dateRange.value ? formatDate(new Date(dateRange.value[0])) : '';
+  const endDate = dateRange.value ? formatDate(new Date(dateRange.value[1])) : '';
 
   try {
     const data = await api.get('/api/dashboard/metrics', {
@@ -345,8 +360,9 @@ const fetchDashboardData = async () => {
       end_date: endDate,
     });
 
+    // Update frontend metrics with new names
     metrics.value = {
-      totalTicketSales: data.total_ticket_sales || 0,
+      totalSales: data.total_sales || 0,
       totalAgentCharges: data.total_agent_charges || 0,
       profitFromSales: data.profit_from_sales || 0,
       otherServiceIncome: data.other_service_income || 0,
@@ -356,7 +372,15 @@ const fetchDashboardData = async () => {
       totalCustomerDeposit: data.total_customer_deposit || 0,
       totalAgentCredit: data.total_agent_credit || 0,
       totalCustomerCredit: data.total_customer_credit || 0,
+      totalCancelledSales: data.total_cancelled_sales || 0, // Updated to match backend key
+      totalCustomerRefundAmount: data.total_customer_refund_amount || 0,
+      totalAgentRefundAmount: data.total_agent_refund_amount || 0,
     };
+    
+    // Update company balances ref with the new data
+    balances.value.cash = data.cash_balance || 0;
+    balances.value.online = data.online_balance || 0;
+
 
     updateSalesExpenseChart(data.sales_expense_trend || []);
     updateParticularSalesChart(data.sales_by_particular || []);
@@ -373,7 +397,7 @@ const fetchDashboardData = async () => {
 
 // --- NEW METHOD FOR REFRESHING ALL DATA ---
 const refreshAllData = () => {
-    fetchCompanyBalances();
+    fetchCompanyBalances(); // Note: This call is redundant as fetchDashboardData also gets balances
     fetchDashboardData();
     fetchCustomerBalances();
     fetchAgentBalances();
@@ -784,9 +808,9 @@ const partnerColumns = [
 onMounted(() => {
   setDefaultDateRange();
   fetchCompanyBalances();
-  fetchCustomerBalances(); 
-  fetchAgentBalances();     
-  fetchPartnerBalances();   
+  fetchCustomerBalances();
+  fetchAgentBalances();
+  fetchPartnerBalances();
 });
 
 onBeforeUnmount(() => {

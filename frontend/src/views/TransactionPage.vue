@@ -928,10 +928,22 @@ const exportTransactions = async (format: 'excel' | 'pdf') => {
       transaction_type: transactionType.value,
     }
     
-    if (dateRange.value) {
+    // Correctly handle date range and time zone issues
+    if (dateRange.value && dateRange.value.length === 2) {
       const [start, end] = dateRange.value
-      params.start_date = new Date(start).toISOString().split('T')[0]
-      params.end_date = new Date(end).toISOString().split('T')[0]
+      
+      const startDate = new Date(start)
+      const endDate = new Date(end)
+      
+      const formatDate = (date) => {
+        const year = date.getFullYear()
+        const month = (date.getMonth() + 1).toString().padStart(2, '0')
+        const day = date.getDate().toString().padStart(2, '0')
+        return `${year}-${month}-${day}`
+      }
+      
+      params.start_date = formatDate(startDate)
+      params.end_date = formatDate(endDate)
     }
     
     const response = await api.get(`/api/transactions/${transactionType.value}`, { 

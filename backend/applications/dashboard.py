@@ -1,67 +1,73 @@
-# applications/dashboard_resources.py
 from flask_restful import Resource
 from flask import jsonify, request, send_file
 from datetime import datetime, timedelta
-from sqlalchemy import func, case, and_, or_
+from sqlalchemy import func, case, and_, or_, union_all, select
 from io import BytesIO
 from fpdf import FPDF
 
-from .model import db, CompanyAccountBalance, Ticket, Transaction, Service, Particular, Agent, Customer, Partner
+from .model import db, CompanyAccountBalance, Ticket, Transaction, Service, Particular, Agent, Customer, Partner, Visa
 
-# from .utils import check_permission # Adjust import path as needed
 
 # Helper function to get dashboard metrics data (reused by API and PDF export)
 def _get_dashboard_metrics_data(start_date_str, end_date_str):
     if not start_date_str or not end_date_str:
         raise ValueError("start_date and end_date are required.")
 
-    # Parse start_date and end_date as date objects for direct comparison
     start_date_obj = datetime.strptime(start_date_str, '%Y-%m-%d').date()
     end_date_obj = datetime.strptime(end_date_str, '%Y-%m-%d').date()
 
     # Base query filter for date range, using func.date() for robustness
-    # This ensures only the date part is considered, regardless of time component in DB
-    ticket_date_filter = and_(func.date(Ticket.date) >= start_date_obj, func.date(Ticket.date) <= end_date_obj)
     transaction_date_filter = and_(func.date(Transaction.date) >= start_date_obj, func.date(Transaction.date) <= end_date_obj)
     service_date_filter = and_(func.date(Service.date) >= start_date_obj, func.date(Service.date) <= end_date_obj)
+    ticket_date_filter = and_(func.date(Ticket.date) >= start_date_obj, func.date(Ticket.date) <= end_date_obj)
+    visa_date_filter = and_(func.date(Visa.date) >= start_date_obj, func.date(Visa.date) <= end_date_obj)
 
     # --- Fetch current company balances up to the end of the selected end_date_str ---
-    # This ensures we get the balance as of the very end of the last selected day
-    balance_as_of_datetime = datetime.strptime(end_date_str, '%Y-%m-%d') + timedelta(days=1) - timedelta(microseconds=1)
-
+    # Reverting to fetch the latest value from the DB, ignoring date range
     cash_balance_obj = CompanyAccountBalance.query.filter_by(mode='cash') \
-                                            .filter(CompanyAccountBalance.updated_at <= balance_as_of_datetime) \
                                             .order_by(CompanyAccountBalance.updated_at.desc(), CompanyAccountBalance.id.desc()) \
                                             .first()
     cash_balance = cash_balance_obj.balance if cash_balance_obj else 0.0
 
     online_balance_obj = CompanyAccountBalance.query.filter_by(mode='online') \
-                                             .filter(CompanyAccountBalance.updated_at <= balance_as_of_datetime) \
                                              .order_by(CompanyAccountBalance.updated_at.desc(), CompanyAccountBalance.id.desc()) \
                                              .first()
     online_balance = online_balance_obj.balance if online_balance_obj else 0.0
     # --- End Company Balance Fetch ---
 
+    # 1. Cumulative Sales of Tickets and Visas
+    # Subquery for booked tickets
+    booked_tickets = select(
+        Ticket.customer_charge.label('customer_charge'),
+        Ticket.agent_paid.label('agent_paid')
+    ).filter(ticket_date_filter, Ticket.status == 'booked')
 
-    # 1. Total sales through ticket (customer rate sum)
-    total_ticket_sales = db.session.query(func.sum(Ticket.customer_charge))\
-                             .filter(ticket_date_filter, Ticket.status == 'booked')\
-                             .scalar() or 0.0
+    # Subquery for booked visas
+    booked_visas = select(
+        Visa.customer_charge.label('customer_charge'),
+        Visa.agent_paid.label('agent_paid')
+    ).filter(visa_date_filter, Visa.status == 'booked')
 
-    # 2. Agent charges (assuming this is agent_paid in Ticket model)
-    total_agent_charges = db.session.query(func.sum(Ticket.agent_paid))\
-                          .filter(ticket_date_filter, Ticket.status == 'booked')\
-                          .scalar() or 0.0
+    # Combine the booked data using union_all
+    combined_sales_data = union_all(booked_tickets, booked_visas).alias('combined_sales_data')
 
-    # 3. Profit from sales (customer rate - agent charge)
-    profit_from_sales = total_ticket_sales - total_agent_charges
+    # Query the combined data for totals
+    cumulative_sales = db.session.query(
+        func.sum(combined_sales_data.c.customer_charge)
+    ).scalar() or 0.0
 
-    # 4. Other Service Income (Service availed rates)
+    cumulative_agent_charges = db.session.query(
+        func.sum(combined_sales_data.c.agent_paid)
+    ).scalar() or 0.0
+
+    profit_from_sales = cumulative_sales - cumulative_agent_charges
+
+    # 2. Other Service Income
     other_service_income = db.session.query(func.sum(Service.customer_charge))\
                            .filter(service_date_filter, Service.status == 'booked')\
                            .scalar() or 0.0
 
-    # 5. Expenditure (other than customer/partner/agent cash_deposit, not wallet updated amount)
+    # 3. Expenditure (other than customer/partner/agent cash_deposit, not wallet updated amount)
     total_expenditure = db.session.query(func.sum(Transaction.amount))\
                             .filter(
                                 transaction_date_filter,
@@ -88,10 +94,10 @@ def _get_dashboard_metrics_data(start_date_str, end_date_str):
                             )\
                             .scalar() or 0.0
 
-    # 6. Net profit (c+d-e)
+    # 4. Net profit
     net_profit = profit_from_sales + other_service_income - total_expenditure
 
-    # 7. Total agent deposit made
+    # 5. Total Agent Deposits
     total_agent_deposit = db.session.query(func.sum(Transaction.amount))\
                          .filter(
                              transaction_date_filter,
@@ -108,7 +114,7 @@ def _get_dashboard_metrics_data(start_date_str, end_date_str):
                          )\
                          .scalar() or 0.0
 
-    # 8. Total Customer Deposits
+    # 6. Total Customer Deposits
     total_customer_deposit = db.session.query(func.sum(Transaction.amount))\
                            .filter(
                                transaction_date_filter,
@@ -124,67 +130,115 @@ def _get_dashboard_metrics_data(start_date_str, end_date_str):
                            )\
                            .scalar() or 0.0
 
-    # 9. Total Agent Credit (actual credit used by agents)
+    # 7. Reverting to old logic: Total Agent Credit (actual credit used by agents)
     total_agent_credit = db.session.query(func.sum(Agent.credit_limit - Agent.credit_balance))\
                              .filter(Agent.active == True)\
                              .scalar() or 0.0
 
-    # 10. Total Customer Credit (actual credit used by customers)
+    # 8. Reverting to old logic: Total Customer Credit (actual credit used by customers)
     total_customer_credit = db.session.query(func.sum(Customer.credit_used))\
                                 .filter(Customer.active == True)\
                                 .scalar() or 0.0
 
-    # Sales and Expense Trend Data for Chart
-    daily_data_query = db.session.query(
+    # 9. Total Cancelled Sales
+    cancelled_tickets = select(Ticket.customer_charge.label('charge')).filter(
+        ticket_date_filter, Ticket.status == 'cancelled'
+    )
+    cancelled_visas = select(Visa.customer_charge.label('charge')).filter(
+        visa_date_filter, Visa.status == 'cancelled'
+    )
+    total_cancelled_sales = db.session.query(func.sum(union_all(cancelled_tickets, cancelled_visas).alias('combined_cancelled').c.charge)).scalar() or 0.0
+
+    # 10. Total Refund to Customer (new logic)
+    refund_status_filter = or_(Ticket.status == 'refunded', Ticket.status == 'cancelled')
+    customer_refund_tickets = select(Ticket.customer_refund_amount.label('refund_amount')).filter(
+        ticket_date_filter, refund_status_filter
+    )
+    refund_status_filter_visa = or_(Visa.status == 'refunded', Visa.status == 'cancelled')
+    customer_refund_visas = select(Visa.customer_refund_amount.label('refund_amount')).filter(
+        visa_date_filter, refund_status_filter_visa
+    )
+    total_customer_refund_amount = db.session.query(func.sum(union_all(customer_refund_tickets, customer_refund_visas).alias('combined_refunded').c.refund_amount)).scalar() or 0.0
+
+    # 11. Total Refund to Agent (new logic)
+    agent_refund_tickets = select(Ticket.agent_recovery_amount.label('refund_amount')).filter(
+        ticket_date_filter, refund_status_filter
+    )
+    agent_refund_visas = select(Visa.agent_recovery_amount.label('refund_amount')).filter(
+        visa_date_filter, refund_status_filter_visa
+    )
+    total_agent_refund_amount = db.session.query(func.sum(union_all(agent_refund_tickets, agent_refund_visas).alias('combined_refunded').c.refund_amount)).scalar() or 0.0
+
+
+    # 12. Sales and Expense Trend Data for Chart (needs to be cumulative)
+    daily_sales_tickets = select(
         func.date(Ticket.date).label('date'),
         func.sum(case((Ticket.status == 'booked', Ticket.customer_charge), else_=0)).label('daily_sales'),
         func.sum(case((Ticket.status == 'booked', Ticket.agent_paid), else_=0)).label('daily_expenses')
-    ).filter(
-        ticket_date_filter
-    ).group_by(
-        func.date(Ticket.date)
-    ).order_by(
-        func.date(Ticket.date)
-    )
+    ).filter(ticket_date_filter).group_by('date')
+    
+    daily_sales_visas = select(
+        func.date(Visa.date).label('date'),
+        func.sum(case((Visa.status == 'booked', Visa.customer_charge), else_=0)).label('daily_sales'),
+        func.sum(case((Visa.status == 'booked', Visa.agent_paid), else_=0)).label('daily_expenses')
+    ).filter(visa_date_filter).group_by('date')
 
-    sales_expense_trend = [{'date': row.date, 'sales': row.daily_sales, 'expenses': row.daily_expenses} for row in daily_data_query.all()]
+    combined_daily_sales = union_all(daily_sales_tickets, daily_sales_visas).alias('combined_daily_sales')
 
-    # Sales by Particular for Bar Chart
-    sales_by_particular_query = db.session.query(
+    sales_expense_trend_query = db.session.query(
+        combined_daily_sales.c.date,
+        func.sum(combined_daily_sales.c.daily_sales).label('daily_sales'),
+        func.sum(combined_daily_sales.c.daily_expenses).label('daily_expenses')
+    ).group_by(combined_daily_sales.c.date).order_by(combined_daily_sales.c.date)
+    
+    sales_expense_trend = [{'date': row.date, 'sales': row.daily_sales, 'expenses': row.daily_expenses} for row in sales_expense_trend_query.all()]
+
+    # 13. Sales by Particular for Bar Chart (needs to be cumulative)
+    sales_by_particular_tickets = select(
         Particular.name,
         func.sum(Ticket.customer_charge).label('total_sales')
-    ).join(Ticket, Ticket.particular_id == Particular.id)\
-    .filter(
-        ticket_date_filter,
-        Ticket.status == 'booked'
-    ).group_by(
-        Particular.name
-    ).order_by(
-        func.sum(Ticket.customer_charge).desc()
-    )
+    ).join(Ticket, Ticket.particular_id == Particular.id).filter(ticket_date_filter, Ticket.status == 'booked').group_by(Particular.name)
+    
+    sales_by_particular_visas = select(
+        Particular.name,
+        func.sum(Visa.customer_charge).label('total_sales')
+    ).join(Visa, Visa.particular_id == Particular.id).filter(visa_date_filter, Visa.status == 'booked').group_by(Particular.name)
+    
+    combined_particular_sales = union_all(sales_by_particular_tickets, sales_by_particular_visas).alias('combined_particular_sales')
+    
+    sales_by_particular_query = db.session.query(
+        combined_particular_sales.c.name,
+        func.sum(combined_particular_sales.c.total_sales).label('total_sales')
+    ).group_by(combined_particular_sales.c.name).order_by(func.sum(combined_particular_sales.c.total_sales).desc())
+
     sales_by_particular_data = [{'name': row.name, 'sales': row.total_sales} for row in sales_by_particular_query.all()]
 
-    # Profit Breakdown by Particular for Pie Chart
-    profit_by_particular_query = db.session.query(
+    # 14. Profit Breakdown by Particular for Pie Chart (needs to be cumulative)
+    profit_by_particular_tickets = select(
         Particular.name,
         func.sum(Ticket.customer_charge - Ticket.agent_paid).label('total_profit')
-    ).join(Ticket, Ticket.particular_id == Particular.id)\
-    .filter(
-        ticket_date_filter,
-        Ticket.status == 'booked'
-    ).group_by(
-        Particular.name
-    ).order_by(
-        func.sum(Ticket.customer_charge - Ticket.agent_paid).desc()
-    )
+    ).join(Ticket, Ticket.particular_id == Particular.id).filter(ticket_date_filter, Ticket.status == 'booked').group_by(Particular.name)
+    
+    profit_by_particular_visas = select(
+        Particular.name,
+        func.sum(Visa.customer_charge - Visa.agent_paid).label('total_profit')
+    ).join(Visa, Visa.particular_id == Particular.id).filter(visa_date_filter, Visa.status == 'booked').group_by(Particular.name)
+
+    combined_particular_profit = union_all(profit_by_particular_tickets, profit_by_particular_visas).alias('combined_particular_profit')
+    
+    profit_by_particular_query = db.session.query(
+        combined_particular_profit.c.name,
+        func.sum(combined_particular_profit.c.total_profit).label('total_profit')
+    ).group_by(combined_particular_profit.c.name).order_by(func.sum(combined_particular_profit.c.total_profit).desc())
+
     profit_by_particular_data = [{'name': row.name, 'profit': row.total_profit} for row in profit_by_particular_query.all()]
 
 
     return {
         'cash_balance': cash_balance,
         'online_balance': online_balance,
-        'total_ticket_sales': total_ticket_sales,
-        'total_agent_charges': total_agent_charges,
+        'total_sales': cumulative_sales,
+        'total_agent_charges': cumulative_agent_charges,
         'profit_from_sales': profit_from_sales,
         'other_service_income': other_service_income,
         'total_expenditure': total_expenditure,
@@ -193,43 +247,36 @@ def _get_dashboard_metrics_data(start_date_str, end_date_str):
         'total_customer_deposit': total_customer_deposit,
         'total_agent_credit': total_agent_credit,
         'total_customer_credit': total_customer_credit,
+        'total_cancelled_sales': total_cancelled_sales,
+        'total_customer_refund_amount': total_customer_refund_amount,
+        'total_agent_refund_amount': total_agent_refund_amount,
         'sales_expense_trend': sales_expense_trend,
         'sales_by_particular': sales_by_particular_data,
         'profit_by_particular': profit_by_particular_data
     }
-
-
 class CompanyBalancesAPI(Resource):
-    # @check_permission()
+    # This API is no longer necessary as the data is included in the main dashboard metrics API.
+    # It can be removed to simplify the codebase.
     def get(self):
-        # Get end_date_str from request, default to today if not provided
+        # Existing code (kept for reference, but should be deprecated)
         end_date_str = request.args.get('end_date', datetime.now().strftime('%Y-%m-%d'))
-        
         try:
-            # Calculate balance_as_of_datetime to get balance up to the end of the day
             balance_as_of_datetime = datetime.strptime(end_date_str, '%Y-%m-%d') + timedelta(days=1) - timedelta(microseconds=1)
-
-            # FIX: Add CompanyAccountBalance.id.desc() as a secondary sort key
             cash_balance_obj = CompanyAccountBalance.query.filter_by(mode='cash') \
                                                     .filter(CompanyAccountBalance.updated_at <= balance_as_of_datetime) \
                                                     .order_by(CompanyAccountBalance.updated_at.desc(), CompanyAccountBalance.id.desc()) \
                                                     .first()
             cash_balance = cash_balance_obj.balance if cash_balance_obj else 0.0
-
-            # FIX: Add CompanyAccountBalance.id.desc() as a secondary sort key
             online_balance_obj = CompanyAccountBalance.query.filter_by(mode='online') \
                                                      .filter(CompanyAccountBalance.updated_at <= balance_as_of_datetime) \
                                                      .order_by(CompanyAccountBalance.updated_at.desc(), CompanyAccountBalance.id.desc()) \
                                                      .first()
             online_balance = online_balance_obj.balance if online_balance_obj else 0.0
-
-            return {
-                'cash_balance': cash_balance,
-                'online_balance': online_balance
-            }
+            return {'cash_balance': cash_balance, 'online_balance': online_balance}
         except Exception as e:
             db.session.rollback()
             return {'error': 'Failed to fetch company balances. Please check server logs.'}, 500
+
 
 # Function to safely encode string for FPDF
 def safe_encode(text):

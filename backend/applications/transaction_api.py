@@ -670,9 +670,11 @@ class TransactionResource(Resource):
 
         if start_date and end_date:
             try:
-                start = datetime.strptime(start_date, '%Y-%m-%d').date()
-                end = datetime.strptime(end_date, '%Y-%m-%d').date() + timedelta(days=1)
-                query = query.filter(Transaction.date >= start, Transaction.date < end)
+                # Convert start date to datetime object
+                start = datetime.strptime(start_date, '%Y-%m-%d')
+                # Convert end date to a datetime object representing the end of the day
+                end = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(hours=23, minutes=59, seconds=59)
+                query = query.filter(Transaction.date >= start, Transaction.date <= end)
             except ValueError:
                 return {'error': 'Invalid date format. Use YYYY-MM-DD.'}, 400
 
