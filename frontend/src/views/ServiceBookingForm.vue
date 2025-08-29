@@ -120,6 +120,7 @@ const message = useMessage();
 const formRef = ref<any>(null);
 
 const form = reactive({
+  id: props.formData.id, // Ensure id is part of the reactive form state
   customer_id: props.formData.customer_id ?? null,
   particular_id: props.formData.particular_id ?? null,
   ref_no: props.formData.ref_no ?? '',
@@ -240,7 +241,12 @@ const submitForm = async () => {
       const response = await api.post('/api/services', payload);
       message.success(`Service booked! Reference: ${response.data.ref_no}`);
       
+      // Pass the bulkAddMode status to the parent.
+      // This is the fix for the form not closing correctly.
+      emits('record-booked', localBulkAddMode.value); 
+      
       if (localBulkAddMode.value) {
+        // Reset form for next entry in bulk mode
         Object.assign(form, {
           customer_id: null,
           customer_charge: 0,
@@ -255,12 +261,6 @@ const submitForm = async () => {
 
         // Emit a new event to the parent to fetch the next reference number
         emits('request-new-ref-no');
-        
-        // **NEW:** Emit record-booked to trigger the parent's data refresh
-        emits('record-booked', { ...payload, ...response.data });
-
-      } else {
-        emits('record-booked', { ...payload, ...response.data });
       }
     }
   } catch (e) {
