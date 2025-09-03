@@ -24,7 +24,7 @@
         />
         <n-grid v-if="selectedFromEntity" :cols="1" style="margin-top: 8px;">
           <n-gi>
-            <n-text type="info">Balance: ₹{{ selectedFromEntity.wallet_balance.toFixed(2) ?? 'N/A' }}</n-text>
+            <n-text type="info">Balance: ₹{{ selectedFromEntity.wallet_balance?.toFixed(2) ?? 'N/A' }}</n-text>
           </n-gi>
         </n-grid>
       </n-space>
@@ -55,7 +55,7 @@
         />
         <n-grid v-if="selectedToEntity" :cols="1" style="margin-top: 8px;">
           <n-gi>
-            <n-text type="info">Balance: ₹{{ selectedToEntity.wallet_balance.toFixed(2) ?? 'N/A' }}</n-text>
+            <n-text type="info">Balance: ₹{{ selectedToEntity.wallet_balance?.toFixed(2) ?? 'N/A' }}</n-text>
           </n-gi>
         </n-grid>
       </n-space>

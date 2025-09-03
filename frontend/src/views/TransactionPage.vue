@@ -861,26 +861,31 @@ const submitTransaction = async () => {
       await api.post(`/api/transactions/${transactionType.value}`, payload);
       message.success('Transaction added');
     }
+    
+  if (bulkAddMode.value && !editingId.value) {
+    // For bulk add, save the current date before resetting other fields
+    const currentDate = form.transaction_date;
 
-    if (bulkAddMode.value && !editingId.value) {
-      // For bulk add, clear fields and fetch a new ref_no to keep the form ready.
-      const fieldsToReset = ['amount', 'description', 'entity_id', 'particular_id', 'transaction_date'];
-      fieldsToReset.forEach(field => {
-        form[field] = null;
-      });
-      // Set the date to the current time for the next transaction.
-      form.transaction_date = Date.now();
-      // Fetch a fresh reference number from the backend to ensure it's incremented correctly.
-      await fetchSchema();
-      message.info('Form cleared for next entry.');
-      // Restore validation state to clear any visual errors from the previous submission.
-      nextTick(() => formRef.value?.restoreValidation?.());
-    } else {
-      // For single add or editing, close the modal and reset all state.
-      modalVisible.value = false;
-      editingId.value = null;
-      bulkAddMode.value = false;
-    }
+    // Clear fields except the date
+    const fieldsToReset = ['amount', 'description', 'entity_id', 'particular_id'];
+    fieldsToReset.forEach(field => {
+      form[field] = null;
+    });
+    
+    // Restore the saved date
+    form.transaction_date = currentDate; 
+
+    // Fetch a fresh reference number from the backend to ensure it's incremented correctly.
+    await fetchSchema();
+    message.info('Form cleared for next entry.');
+    // Restore validation state to clear any visual errors from the previous submission.
+    nextTick(() => formRef.value?.restoreValidation?.());
+  } else {
+    // For single add or editing, close the modal and reset all state.
+    modalVisible.value = false;
+    editingId.value = null;
+    bulkAddMode.value = false;
+  }
     // Fetch the updated list of transactions to reflect the new or edited entry.
     await fetchTransactions();
   } catch (e: any) {

@@ -33,15 +33,18 @@
           />
           <n-grid v-if="selectedToEntity" :cols="2" x-gap="12" style="margin-top: 8px;">
             <n-gi>
-              <n-text type="info">Wallet: ₹{{ selectedToEntity.wallet_balance ?? 'N/A' }}</n-text>
+              <n-text type="info">Wallet: ₹{{ selectedToEntity.wallet_balance?.toFixed(2) ?? 'N/A' }}</n-text>
             </n-gi>
             <n-gi>
               <n-text type="warning">
                 <template v-if="form.to_entity_type === 'agent'">
-                  Credit: ₹{{ selectedToEntity.credit_balance ?? 'N/A' }}/₹{{ selectedToEntity.credit_limit ?? 'N/A' }}
+                  Credit: ₹{{ selectedToEntity.credit_balance?.toFixed(2) ?? 'N/A' }}/₹{{ selectedToEntity.credit_limit?.toFixed(2) ?? 'N/A' }}
+                </template>
+                <template v-else-if="form.to_entity_type === 'customer'">
+                  Credit: ₹{{ selectedToEntity.credit_used?.toFixed(2) ?? 'N/A' }}/₹{{ selectedToEntity.credit_limit?.toFixed(2) ?? 'N/A' }}
                 </template>
                 <template v-else>
-                  Credit: ₹{{ selectedToEntity.credit_used ?? 'N/A' }}/₹{{ selectedToEntity.credit_limit ?? 'N/A' }}
+                  Credit: N/A
                 </template>
               </n-text>
             </n-gi>
@@ -122,15 +125,18 @@
           />
           <n-grid v-if="selectedFromEntity" :cols="2" x-gap="12" style="margin-top: 8px;">
             <n-gi>
-              <n-text type="info">Wallet: ₹{{ selectedFromEntity.wallet_balance.toFixed(2) ?? 'N/A' }}</n-text>
+              <n-text type="info">Wallet: ₹{{ selectedFromEntity.wallet_balance?.toFixed(2) ?? 'N/A' }}</n-text>
             </n-gi>
             <n-gi>
               <n-text type="warning">
                 <template v-if="form.from_entity_type === 'agent'">
-                  Credit: ₹{{ selectedFromEntity.credit_balance ?? 'N/A' }}
+                  Credit: ₹{{ selectedFromEntity.credit_balance?.toFixed(2) ?? 'N/A' }}
+                </template>
+                <template v-else-if="form.from_entity_type === 'customer'">
+                  Credit: ₹{{ selectedFromEntity.credit_used?.toFixed(2) ?? 'N/A' }}/₹{{ selectedFromEntity.credit_limit?.toFixed(2) ?? 'N/A' }}
                 </template>
                 <template v-else>
-                  Credit: ₹{{ selectedFromEntity.credit_used.toFixed(2) ?? 'N/A' }}/₹{{ selectedFromEntity.credit_limit.toFixed(2) ?? 'N/A' }}
+                  Credit: N/A
                 </template>
               </n-text>
             </n-gi>

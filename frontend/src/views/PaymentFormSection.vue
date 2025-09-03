@@ -20,15 +20,18 @@
         />
         <n-grid v-if="selectedEntity" :cols="2" x-gap="12" style="margin-top: 8px;">
           <n-gi>
-            <n-text type="info">Wallet: ₹{{ selectedEntity.wallet_balance.toFixed(2) ?? 'N/A' }}</n-text>
+            <n-text type="info">Wallet: ₹{{ selectedEntity.wallet_balance?.toFixed(2) ?? 'N/A' }}</n-text>
           </n-gi>
           <n-gi>
             <n-text type="warning">
               <template v-if="form.entity_type === 'agent'">
-                Credit Balance: ₹{{ selectedEntity.credit_balance.toFixed(2) ?? 'N/A' }}/₹{{ selectedEntity.credit_limit.toFixed(2) ?? 'N/A' }}
+                Credit Balance: ₹{{ selectedEntity.credit_balance?.toFixed(2) ?? 'N/A' }}/₹{{ selectedEntity.credit_limit?.toFixed(2) ?? 'N/A' }}
+              </template>
+              <template v-else-if="form.entity_type === 'customer'">
+                Credit Used: ₹{{ selectedEntity.credit_used?.toFixed(2) ?? 'N/A' }}/₹{{ selectedEntity.credit_limit?.toFixed(2) ?? 'N/A' }}
               </template>
               <template v-else>
-                Credit Used: ₹{{ selectedEntity.credit_used.toFixed(2) ?? 'N/A' }}/₹{{ selectedEntity.credit_limit.toFixed(2) ?? 'N/A' }}
+                Credit: N/A
               </template>
             </n-text>
           </n-gi>
@@ -93,6 +96,7 @@
 
 <script setup lang="ts">
 import type { PropType } from 'vue'
+import { NGrid } from 'naive-ui'; // Import NGrid as it's used in the template
 
 defineProps({
   form: {
