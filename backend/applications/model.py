@@ -127,16 +127,19 @@ class User(db.Model, UserMixin):
         }
 
         perms = {}
-        # Process permissions with priority from highest to lowest
-        for perm in chain(self.role.permissions, self.permissions):
+        
+        # Process user overrides first
+        for perm in self.permissions:
             page_name = perm.page.name.lower()
-            current_op = perms.get(page_name, 'none')
-            new_op = perm.crud_operation
+            perms[page_name] = perm.crud_operation
 
-            if permission_order.get(new_op, 0) > permission_order.get(current_op, 0):
-                perms[page_name] = new_op
-
-        # Only return the final, effective permissions as strings
+        # Process role permissions as a fallback, but do not override existing user permissions
+        for perm in self.role.permissions:
+            page_name = perm.page.name.lower()
+            if page_name not in perms:
+                perms[page_name] = perm.crud_operation
+        
+        # Only return the final, effective permissions as strings, ignoring 'none'
         return [f"{page}.{op}" for page, op in perms.items() if op != 'none']
     
 

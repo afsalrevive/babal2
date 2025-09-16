@@ -90,7 +90,7 @@
 
       <n-space class="action-buttons" justify="end">
         <n-button @click="$emit('cancel')">Cancel</n-button>
-        <PermissionWrapper resource="service" :operation="editMode ? 'modify' : 'write'">
+        <PermissionWrapper resource="services" operation="write">
           <n-button type="primary" @click="submitForm()">
             {{ editMode ? 'Update' : (localBulkAddMode ? 'Save and Next' : 'Book Service') }}
           </n-button>

@@ -724,6 +724,11 @@ async function fetchAll() {
   }
 }
 
+const getPageIconComponent = (pageName: string) => {
+  const normalizedName = pageName.toLowerCase().replace(/\s/g, '');
+  return iconMap[normalizedName as IconName] || iconMap.default;
+};
+
 async function fetchACLPages() {
   const res = await api.get('/api/pages')
   const pagesData = Array.isArray(res.data)
@@ -732,14 +737,11 @@ async function fetchACLPages() {
 
   aclPages.value = pagesData.map((p: any) => {
     rolePermMap[p.id] = p.role_perm
-    let iconKey = p.name.toLowerCase().replace('management', '')
-    if (iconKey !== 'settings') {
-      iconKey = iconKey.replace(/s$/, '')
-    }
+    const iconComponent = getPageIconComponent(p.name);
     return {
       id: Number(p.id),
       name: p.name,
-      iconComponent: iconMap[iconKey as IconName] || iconMap.pages
+      iconComponent: iconComponent
     }
   })
 }
@@ -1043,19 +1045,18 @@ async function openUserPermissionsModal(user: User) {
 
     aclPages.value = res.data.pages.map(p => {
       rolePermMap[p.id] = p.role_perm
-
       permForm[p.id] = p.override ? p.effective : 'inherit'
       if (p.override) {
         initialUserOverrides.value.add(p.id)
       }
-
-      let iconKey = p.name.toLowerCase().replace('management', '')
-      if (iconKey !== 'settings') iconKey = iconKey.replace(/s$/, '')
+      
+      // Use the new, consistent helper function to get the icon
+      const iconComponent = getPageIconComponent(p.name);
 
       return {
         id: p.id,
         name: p.name,
-        iconComponent: iconMap[iconKey as IconName] || iconMap.pages
+        iconComponent: iconComponent
       }
     })
 
