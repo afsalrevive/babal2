@@ -226,7 +226,7 @@ const defaultFieldsByEntity: Record<string, Record<string, any>> = {
   customer: { name: '', email: '', contact: '', wallet_balance: 0, credit_limit: 0, credit_used: 0, active: true },
   agent: { name: '', contact: '', email: '', wallet_balance: 0, credit_limit: 0, credit_balance: 0, active: true },
   partner: { name: '', contact: '', email: '', wallet_balance: 0, active: true, allow_negative_wallet: false },
-  passenger: { name: '', contact: '', passport_number: '', salutation: '', address: '', city: '', state: '', country: '', zip_code: '', fathers_name: '', mothers_name: '', date_of_birth: null, passport_issue_date: null, passport_expiry: null, nationality: '', active: true },
+  passenger: { salutation: '', first_name: '', middle_name: '', last_name: '', contact: '', passport_number: '', date_of_birth: null, nationality: '', active: true },
   travel_location: { name: '', active: true },
   ticket_type: { name: '', active: true },
   visa_type: { name: '', active: true },
@@ -250,12 +250,6 @@ const filteredData = computed(() => {
   return d;
 });
 
-const paginatedData = computed(() => {
-  const start = (pagination.page - 1) * pagination.pageSize;
-  const end = start + pagination.pageSize;
-  return filteredData.value.slice(start, end);
-});
-
 
 const fetchData = async () => {
   loading.value = true;
@@ -268,7 +262,7 @@ const fetchData = async () => {
     
    
     let keys = Object.keys(defaultFieldsByEntity[activeTab.value]);
-    const hiddenFields = ['address', 'fathers_name', 'mothers_name', 'passport_issue_date', 'passport_expiry'];
+    const hiddenFields = ['address','active', 'fathers_name', 'mothers_name', 'passport_issue_date', 'passport_expiry'];
     keys = keys.filter(k => !hiddenFields.includes(k));
 
     const baseColumns: DataTableColumns = keys.map(key => {

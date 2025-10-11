@@ -24,7 +24,9 @@ class LoginAPI(Resource):
             if not user or not user.check_password(password):
                 return {"error": "Invalid credentials"}, 401
 
-            # Modified Section
+            if user.status != 'active':
+                return {"error": "Your account is inactive. Please contact an administrator."}, 403
+            
             perms_set = set()
 
             # 1. Process ROLE permissions first
@@ -34,7 +36,6 @@ class LoginAPI(Resource):
 
                 page_name = normalize(p.page.name)
                 
-                # Skip 'none' in roles (they shouldn't exist here normally)
                 if p.crud_operation == "none":
                     continue
                     

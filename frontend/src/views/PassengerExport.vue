@@ -16,7 +16,9 @@ import 'jspdf-autotable';
 // Define the shape of the passenger object for better type safety
 interface Passenger {
   id: number;
-  name: string;
+  first_name: string;
+  middle_name?: string;
+  last_name?: string;
   contact?: string;
   passport_number?: string;
   salutation?: string;
@@ -70,20 +72,26 @@ const exportToPdf = () => {
   selectedPassengers.forEach((passenger, index) => {
     checkPageBreak(120); // Estimated space for one passenger's details
 
+    const fullName = [passenger.first_name, passenger.middle_name, passenger.last_name].filter(Boolean).join(' ');
+
     // Header for each passenger profile
     doc.setFontSize(16);
-    doc.text(`Passenger Profile: ${passenger.name}`, 14, yOffset);
+    doc.text(`Passenger Profile: ${fullName}`, 14, yOffset);
     doc.setFontSize(10);
     yOffset += 8;
     doc.line(14, yOffset, 196, yOffset); // Separator line
     yOffset += 8;
 
-    // Contact and Personal Details
+    // Personal Details
     doc.setFontSize(12);
     doc.text('Personal Details', 14, yOffset);
     doc.setFontSize(10);
     yOffset += 6;
-    doc.text(`Name: ${passenger.salutation || ''} ${passenger.name || ''}`, 14, yOffset);
+    doc.text(`Salutation: ${passenger.salutation || 'N/A'}`, 14, yOffset);
+    doc.text(`First Name: ${passenger.first_name || 'N/A'}`, 100, yOffset);
+    yOffset += 6;
+    doc.text(`Middle Name: ${passenger.middle_name || 'N/A'}`, 14, yOffset);
+    doc.text(`Last Name: ${passenger.last_name || 'N/A'}`, 100, yOffset);
     yOffset += 6;
     doc.text(`Date of Birth: ${passenger.date_of_birth ? new Date(passenger.date_of_birth).toLocaleDateString() : 'N/A'}`, 14, yOffset);
     doc.text(`Contact: ${passenger.contact || 'N/A'}`, 100, yOffset);

@@ -252,10 +252,12 @@
         <n-space vertical>
           <n-alert type="info" :title="`Details for ${selectedPassengerDetails.name}`">
             <n-grid cols="1 600:2" x-gap="12" y-gap="8">
-              <n-gi><b>Name:</b> {{ selectedPassengerDetails.name }}</n-gi>
+              <n-gi><b>Salutation:</b> {{ selectedPassengerDetails.salutation || 'N/A' }}</n-gi>
+              <n-gi><b>First Name:</b> {{ selectedPassengerDetails.first_name || 'N/A' }}</n-gi>
+              <n-gi><b>Middle Name:</b> {{ selectedPassengerDetails.middle_name || 'N/A' }}</n-gi>
+              <n-gi><b>Last Name:</b> {{ selectedPassengerDetails.last_name || 'N/A' }}</n-gi>
               <n-gi><b>Contact:</b> {{ selectedPassengerDetails.contact || 'N/A' }}</n-gi>
               <n-gi><b>Passport Number:</b> {{ selectedPassengerDetails.passport_number || 'N/A' }}</n-gi>
-              <n-gi><b>Salutation:</b> {{ selectedPassengerDetails.salutation || 'N/A' }}</n-gi>
               <n-gi><b>Date of Birth:</b> {{ selectedPassengerDetails.date_of_birth ? new Date(selectedPassengerDetails.date_of_birth).toLocaleDateString() : 'N/A' }}</n-gi>
               <n-gi><b>Passport Issue Date:</b> {{ selectedPassengerDetails.passport_issue_date ? new Date(selectedPassengerDetails.passport_issue_date).toLocaleDateString() : 'N/A' }}</n-gi>
               <n-gi><b>Passport Expiry:</b> {{ selectedPassengerDetails.passport_expiry ? new Date(selectedPassengerDetails.passport_expiry).toLocaleDateString() : 'N/A' }}</n-gi>

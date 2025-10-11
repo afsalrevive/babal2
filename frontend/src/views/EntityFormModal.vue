@@ -242,7 +242,7 @@ const formRules = computed<FormRules>(() => {
     if (typeof defaultValue === 'boolean') return
     if (shouldDisableField(key)) return // Use the updated helper function
 
-    if (key === 'name') {
+    if (key === 'name' || (entity === 'passenger' && key === 'first_name')) {
       rules[key] = [{ required: true, message: `${toSentenceCase(key)} is required`, trigger: ['input', 'blur'] }]
     }
     
@@ -279,7 +279,7 @@ const defaultFieldsByEntity: Record<string, Record<string, any>> = {
   customer: { name: '', email: '', contact: '', credit_limit: 0, credit_used: 0, active: true },
   agent: { name: '', contact: '', email: '', credit_limit: 0, credit_balance: 0, active: true },
   partner: { name: '', contact: '', email: '', active: true, allow_negative_wallet: false },
-  passenger: { name: '', contact: '', passport_number: '', salutation: '', address: '', city: '', state: '', country: '', zip_code: '', fathers_name: '', mothers_name: '', date_of_birth: null, passport_issue_date: null, passport_expiry: null, nationality: '', active: true },
+  passenger: { salutation: '', first_name: '', middle_name: '', last_name: '', contact: '', passport_number: '', address: '', city: '', state: '', country: '', zip_code: '', fathers_name: '', mothers_name: '', date_of_birth: null, passport_issue_date: null, passport_expiry: null, nationality: '', active: true },
   travel_location: { name: '', active: true },
   ticket_type: { name: '', active: true},
   visa_type: { name: '', active: true },

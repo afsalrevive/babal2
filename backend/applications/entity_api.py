@@ -126,7 +126,7 @@ def validate_entity_input(entity_type, data, is_update=False):
         'customer': ['name'],
         'agent': ['name'],
         'partner': ['name'],
-        'passenger': ['name'],
+        'passenger': ['first_name'],
         'particular': ['name'],
         'ticket_type': ['name'],
         'visa_type': ['name'],
@@ -207,6 +207,9 @@ class EntityResource(Resource):
                 if field in base and base[field] is not None:
                     base[field] = base[field].isoformat()
             
+            if entity_type.lower() == 'passenger':
+                base['name'] = r.name
+
             # Add relationship flags
             if entity_type.lower() == 'customer':
                 base['has_tickets'] = db.session.query(

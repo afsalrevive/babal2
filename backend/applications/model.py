@@ -4,6 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
 from itertools import chain
+from sqlalchemy.ext.hybrid import hybrid_property
 
 db = SQLAlchemy()
 
@@ -210,7 +211,9 @@ class Customer(db.Model):
 
 class Passenger(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(120), nullable=False, unique=True)
+    first_name = db.Column(db.String(50), nullable=False)
+    middle_name = db.Column(db.String(50))
+    last_name = db.Column(db.String(50))
     contact = db.Column(db.String(40))
     passport_number = db.Column(db.String(40), nullable=True)
     active = db.Column(db.Boolean, default=True)
@@ -227,6 +230,19 @@ class Passenger(db.Model):
     passport_expiry = db.Column(db.Date, nullable=True)
     nationality = db.Column(db.String(50), nullable=True)
     
+    @hybrid_property
+    def name(self):
+        parts = [self.first_name, self.middle_name, self.last_name]
+        return " ".join(part for part in parts if part)
+
+    @name.expression
+    def name(cls):
+        return db.func.trim(
+            db.func.coalesce(cls.first_name, '') + ' ' +
+            db.func.coalesce(cls.middle_name, '') + ' ' +
+            db.func.coalesce(cls.last_name, '')
+        )
+        
     tickets = db.relationship('Ticket', backref='passenger', lazy=True)
     visas = db.relationship('Visa', backref='passenger', lazy=True)
     
