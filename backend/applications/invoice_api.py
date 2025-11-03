@@ -10,6 +10,7 @@ from sqlalchemy import or_, and_
 from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 import xlsxwriter
+from sqlalchemy.orm import joinedload
 
 # ========= Helpers =========
 def generate_invoice_number(entity_type):
@@ -55,14 +56,14 @@ def parse_date(date_input):
 # ========= Core Logic =========
 class PDF(FPDF):
     def header(self):
-        header_path = os.path.join(current_app.config['TEMPLATE_FOLDER'], 'header1.jpg')
+        header_path = os.path.join(current_app.config['TEMPLATE_FOLDER'], 'header.jpg')
         if os.path.exists(header_path):
             self.image(header_path, x=0, y=0, w=self.w)
         self.set_y(50)
         
     def footer(self):
         self.set_y(-50)
-        footer_path = os.path.join(current_app.config['TEMPLATE_FOLDER'], 'footer1.jpg')
+        footer_path = os.path.join(current_app.config['TEMPLATE_FOLDER'], 'footer.jpg')
         if os.path.exists(footer_path):
             self.image(footer_path, x=0, y=self.get_y(), w=self.w)
 
@@ -120,12 +121,16 @@ class InvoiceCore:
             Transaction.entity_id == entity_id
         ).all()
         
-        tickets = Ticket.query.filter(
+        tickets = Ticket.query.options(
+            joinedload(Ticket.passenger)  # This will now be recognized
+        ).filter(
             Ticket.date >= start_date,
             Ticket.date < end_date
         ).filter_by(**{f'{entity_type}_id': entity_id}).all()
 
-        visas = Visa.query.filter(
+        visas = Visa.query.options(
+            joinedload(Visa.passenger)  # This will now be recognized
+        ).filter(
             Visa.date >= start_date,
             Visa.date < end_date
         ).filter_by(**{f'{entity_type}_id': entity_id}).all()
@@ -172,11 +177,19 @@ class InvoiceCore:
     def _format_bookings(self, bookings, booking_type, entity_type):
         formatted_bookings = []
         for b in bookings:
+            # --- START MODIFICATION ---
+            passenger_name = "N/A"
+            # Check if the booking (Ticket/Visa) has a passenger and if it's loaded
+            if hasattr(b, 'passenger') and b.passenger:
+                passenger_name = b.passenger.name
+            # --- END MODIFICATION ---
+
             item = {
                 "date": b.date.strftime('%Y-%m-%d'),
                 "ref_no": b.ref_no,
                 "type": booking_type,
                 "status": b.status,
+                "passenger_name": passenger_name  # <-- ADDED
             }
             if entity_type == 'customer':
                 item["Charge"] = b.customer_charge
@@ -217,7 +230,7 @@ class InvoiceCore:
         excel_data["Summary"]["data"].append([credit_label, data["entity"]["current_credit_balance"]])
 
         # Bookings section
-        booking_headers = ["Date", "Ref No", "Description", "Amount", "Refund Amount", "Mode", "Status"]
+        booking_headers = ["Date", "Ref No","Passenger", "Description", "Amount", "Refund Amount", "Mode", "Status"]
         all_bookings = data['tickets'] + data['visas'] + data['services']
         
         booking_rows = []
@@ -300,31 +313,22 @@ class InvoiceCore:
 
         pdf.set_font('Arial', 'B', 12)
         if is_invoice and invoice_number:
-            pdf.cell(0, 5, f'Invoice Number: {invoice_number}', 0, 1, 'L')
-        
-        pdf.cell(0, 5, f'Invoice To: {data["entity"]["name"]}', 0, 1, 'L')
+            pdf.cell(0, 5, f'Invoice #: {invoice_number}', 0, 1, 'L')
+        pdf.cell(0, 5, f'Invoice Date: {datetime.now().strftime("%Y-%m-%d")}', 0, 1, 'L')
+        pdf.cell(0, 5, f'To: {data["entity"]["name"]}', 0, 1, 'L')
         pdf.set_font('Arial', '', 10)
-        pdf.cell(0, 5, f'Type: {entity_type.capitalize()}', 0, 1, 'L')
         pdf.cell(0, 5, f'Contact: {data["entity"]["contact"]}', 0, 1, 'L')
         pdf.cell(0, 5, f'Email: {data["entity"]["email"]}', 0, 1, 'L')
         pdf.ln(5)
-        pdf.cell(0, 5, f'Date Range: {start_date} to {end_date}', 0, 1, 'L')
-
-        pdf.set_font('Arial', 'B', 10)
-        pdf.cell(0, 5, f'Current Wallet Balance: {data["entity"]["current_wallet_balance"]:.2f}', 0, 1, 'L')
+        pdf.cell(0, 5, f'Booking Range: {start_date} to {end_date}', 0, 1, 'L')
         
-        if entity_type == 'customer':
-            pdf.cell(0, 5, f'Current Credit Used: {data["entity"]["current_credit_balance"]:.2f}', 0, 1, 'L')
-        elif entity_type == 'agent':
-            pdf.cell(0, 5, f'Current Credit Balance: {data["entity"]["current_credit_balance"]:.2f}', 0, 1, 'L')
-
         pdf.ln(10)
         
         pdf.set_font('Arial', 'B', 12)
-        pdf.cell(0, 10, 'Bookings for the period', 0, 1, 'L')
+        pdf.cell(0, 10, 'Bookings', 0, 1, 'L')
         
-        booking_headers = ["Date", "Ref No", "Description", "Amount", "Refund Amount", "Mode", "Status"]
-        booking_col_widths = [18, 25, 50, 25, 25, 25, 25]
+        booking_headers = ["Date", "Ref No", "Passenger", "Description", "Amount", "Refund"]
+        booking_col_widths = [22, 25, 55, 35, 24, 24]
         
         # Set and draw table headers for the first time
         pdf.set_table_headers(booking_headers, booking_col_widths)
@@ -336,70 +340,67 @@ class InvoiceCore:
         total_bookings_amount = 0
         total_refunds_amount = 0
         
-        booking_mode_totals = {'cash': 0, 'online': 0, 'wallet': 0}
-        refund_mode_totals = {'cash': 0, 'online': 0, 'wallet': 0}
-        
         for item in all_bookings:
             amount_key = 'Charge' if entity_type == 'customer' else 'Paid'
             amount = item.get(amount_key, 0)
             refund_amount = item.get("Refund Amount", 0)
             
-            mode_key = item.get('Payment Mode', 'na').lower()
-            if mode_key in booking_mode_totals:
-                booking_mode_totals[mode_key] += amount
-            
             total_bookings_amount += amount
             
             if item['status'] == 'cancelled':
-                if mode_key in refund_mode_totals:
-                    refund_mode_totals[mode_key] += refund_amount
                 total_refunds_amount += refund_amount
+
+            passenger_name = item['passenger_name']
+            MAX_PASSENGER_LEN = 28 # Max chars to fit in 55mm column
+            
+            if len(passenger_name) > MAX_PASSENGER_LEN:
+                passenger_name = passenger_name[:MAX_PASSENGER_LEN-3] + '...'
             
             pdf.cell(booking_col_widths[0], 8, item['date'], 1, 0, 'C')
             pdf.cell(booking_col_widths[1], 8, item['ref_no'], 1, 0, 'C')
-            pdf.cell(booking_col_widths[2], 8, f"{item['type'].capitalize()} Booking", 1, 0, 'L')
+            pdf.cell(booking_col_widths[2], 8, passenger_name, 1, 0, 'L')
+            pdf.cell(booking_col_widths[3], 8, f"{item['type'].capitalize()} Booking", 1, 0, 'L')
             
             if item['status'] == 'cancelled':
-                pdf.cell(booking_col_widths[3], 8, f"{amount:.2f}", 1, 0, 'R')
-                pdf.cell(booking_col_widths[4], 8, f"{refund_amount:.2f}", 1, 0, 'R')
+                pdf.cell(booking_col_widths[4], 8, f"{amount:.2f}", 1, 0, 'R')
+                pdf.cell(booking_col_widths[5], 8, f"{refund_amount:.2f}", 1, 0, 'R')
             else:
-                pdf.cell(booking_col_widths[3], 8, f"{amount:.2f}", 1, 0, 'R')
-                pdf.cell(booking_col_widths[4], 8, '-', 1, 0, 'C')
+                pdf.cell(booking_col_widths[4], 8, f"{amount:.2f}", 1, 0, 'R')
+                pdf.cell(booking_col_widths[5], 8, '-', 1, 0, 'C')
                 
-            pdf.cell(booking_col_widths[5], 8, item.get('Payment Mode', '-').capitalize(), 1, 0, 'C')
-            pdf.cell(booking_col_widths[6], 8, item['status'].capitalize(), 1, 0, 'C')
             pdf.ln()
 
+        # --- Summary Table ---
+        
+        # Calculate widths for the summary rows dynamically
+        label_width = sum(booking_col_widths[:4]) # 22 + 25 + 55 + 35 = 137
+        amount_col_width = booking_col_widths[4]  # 24
+        refund_col_width = booking_col_widths[5]  # 24
+        total_value_width = amount_col_width + refund_col_width # 48
+
         pdf.set_font('Arial', 'B', 10)
-        pdf.cell(sum(booking_col_widths) - 50, 8, 'Total Booked Amount:', 1, 0, 'R', 1)
-        pdf.cell(50, 8, f"{total_bookings_amount:.2f}", 1, 0, 'R', 1)
+        
+        # Total Amount row
+        pdf.cell(label_width, 8, 'Total Amount:', 1, 0, 'R', 1)
+        pdf.cell(amount_col_width, 8, f"{total_bookings_amount:.2f}", 1, 0, 'R', 1)
+        pdf.cell(refund_col_width, 8, '', 1, 0, 'C', 1) # Empty cell for refund
         pdf.ln()
         
-        pdf.cell(sum(booking_col_widths) - 50, 8, 'Total Refund Amount:', 1, 0, 'R', 1)
-        pdf.cell(50, 8, f"{total_refunds_amount:.2f}", 1, 0, 'R', 1)
+        # Total Refund row
+        pdf.cell(label_width, 8, 'Total Refund Amount:', 1, 0, 'R', 1)
+        pdf.cell(amount_col_width, 8, '', 1, 0, 'C', 1) # Empty cell for amount
+        pdf.cell(refund_col_width, 8, f"{total_refunds_amount:.2f}", 1, 0, 'R', 1)
         pdf.ln()
 
-        pdf.ln(5)
-        pdf.set_font('Arial', 'B', 10)
-        pdf.cell(0, 8, 'Booking Amounts by Mode:', 0, 1)
-        for mode, total in booking_mode_totals.items():
-            if total > 0:
-                pdf.cell(0, 8, f"Total Paid via {mode.capitalize()}: {total:.2f}", 0, 1, 'R')
+        # Net Payable Row
+        net_payable = total_bookings_amount - total_refunds_amount
+        pdf.cell(label_width, 8, 'Net Payable Amount:', 1, 0, 'R', 1)
+        pdf.cell(total_value_width, 8, f"{net_payable:.2f}", 1, 0, 'R', 1) # Spans last 2 columns
+        pdf.ln()
 
-        pdf.ln(2)
-        pdf.cell(0, 8, 'Refund Amounts by Mode:', 0, 1)
-        for mode, total in refund_mode_totals.items():
-            if total > 0:
-                pdf.cell(0, 8, f"Total Refunded via {mode.capitalize()}: {total:.2f}", 0, 1, 'R')
-        
+        # --- End Summary Table ---
+
         pdf.ln(5)
-        pdf.set_font('Arial', 'B', 12)
-        
-        cash_online_bookings = booking_mode_totals.get('cash', 0) + booking_mode_totals.get('online', 0)
-        cash_online_refunds = refund_mode_totals.get('cash', 0) + refund_mode_totals.get('online', 0)
-        net_amount_to_pay = cash_online_bookings - cash_online_refunds
-        
-        pdf.cell(0, 10, f"Net Booking Amount (Cash & Online): {net_amount_to_pay:.2f}", 0, 1, 'R')
         
         pdf.add_page()
         

@@ -16,3 +16,6 @@ ts.sqlite3
 # OS-specific
 .DS_Store
 Thumbs.db
+
+# folders
+invoices/
